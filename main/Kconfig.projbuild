@@ -377,6 +377,16 @@ config USE_MULTILINE_CHAT_MESSAGE
         When disabled (default), a single-line horizontally scrolling label
         is shown at the bottom of the screen.
 
+config AI_PASSPORT_KIDS_UI
+    bool "AI Passport kids UI (starry-night theme)"
+    depends on BOARD_TYPE_FOLOTOY_AI_PASSPORT && USE_DEFAULT_MESSAGE_STYLE
+    default n
+    help
+        Dark, anime-style screens for a young child: a code-drawn mascot whose
+        face shows the device state, a status pill, and a speech bubble that
+        shows only the child's own words. Adds the KUI maintenance commands
+        (volume, screen capture, gallery) on the USB Serial/JTAG console.
+
 choice WAKE_WORD_TYPE
     prompt "Wake Word Implementation Type"
     default USE_AFE_WAKE_WORD if (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32S31) && SPIRAM

@@ -6,6 +6,11 @@
 #include "config.h"
 #include "assets/lang_config.h"
 #include "cw2017_battery_monitor.h"
+#if CONFIG_AI_PASSPORT_KIDS_UI
+#include "kids_display.h"
+
+#include <nvs.h>
+#endif
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -54,6 +59,17 @@ private:
         battery_->Initialize();
     }
 
+    // The kids UI shows a volume bar instead of the text notification.
+    void ShowVolume(int volume, const std::string& text) {
+#if CONFIG_AI_PASSPORT_KIDS_UI
+        (void)text;
+        static_cast<KidsDisplay*>(display_)->ShowVolume(volume);
+#else
+        (void)volume;
+        GetDisplay()->ShowNotification(text);
+#endif
+    }
+
     void ChangeVolume(int delta) {
         auto codec = GetAudioCodec();
         auto volume = codec->output_volume() + delta;
@@ -64,7 +80,7 @@ private:
             volume = 0;
         }
         codec->SetOutputVolume(volume);
-        GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
+        ShowVolume(volume, Lang::Strings::VOLUME + std::to_string(volume));
     }
 
     void ToggleChat() {
@@ -118,7 +134,7 @@ private:
         up->OnLongPress([this]() {
             Application::GetInstance().Schedule([this]() {
                 GetAudioCodec()->SetOutputVolume(100);
-                GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
+                ShowVolume(100, Lang::Strings::MAX_VOLUME);
             });
         });
 
@@ -129,7 +145,7 @@ private:
         down->OnLongPress([this]() {
             Application::GetInstance().Schedule([this]() {
                 GetAudioCodec()->SetOutputVolume(0);
-                GetDisplay()->ShowNotification(Lang::Strings::MUTED);
+                ShowVolume(0, Lang::Strings::MUTED);
             });
         });
 
@@ -210,14 +226,46 @@ private:
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_disp_on_off(panel, true);
 
+#if CONFIG_AI_PASSPORT_KIDS_UI
+        display_ =
+            new KidsDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X,
+                            DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+#else
         display_ = new SpiLcdDisplay(panel_io, panel,
                                      DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                      DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
                                      DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+#endif
     }
+
+#if CONFIG_AI_PASSPORT_KIDS_UI
+    // esp-wifi-connect 3.3.3 stores the first entry of its TX power list
+    // (8 = 2 dBm) when the Advanced tab is saved on a device whose "wifi"
+    // namespace does not exist yet, which leaves Wi-Fi barely usable. Drop
+    // that value; opening the namespace read-write also creates it, so the
+    // setup page shows the real default next time.
+    void FixWifiTxPower() {
+        nvs_handle_t nvs;
+        if (nvs_open("wifi", NVS_READWRITE, &nvs) != ESP_OK) {
+            return;
+        }
+        int8_t power = 0;
+        if (nvs_get_i8(nvs, "max_tx_power", &power) == ESP_OK && power == 8) {
+            nvs_erase_key(nvs, "max_tx_power");
+            nvs_commit(nvs);
+            ESP_LOGW(TAG, "Removed wifi/max_tx_power=8 (2 dBm) saved by the Wi-Fi setup page");
+        }
+        nvs_close(nvs);
+    }
+#endif
 
 public:
     AiPassportBoard() : display_(nullptr), battery_(nullptr) {
+#if CONFIG_AI_PASSPORT_KIDS_UI
+        FixWifiTxPower();
+        // Backlight off (PWM duty 0) until the display has drawn its dark first frame.
+        GetBacklight();
+#endif
         InitializeCodecI2c();
         InitializeSpi();
         InitializeDisplay();
