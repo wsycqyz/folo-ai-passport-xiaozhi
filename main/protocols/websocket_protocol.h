@@ -32,7 +32,7 @@ private:
     void ParseServerHello(const cJSON* root);
     bool Connect(const std::string& url, const std::string& token);
     bool CreateWebsocket(const std::string& token);
-    void DiscardFailedWebsocket();
+    void DiscardWebsocket();
     bool SendText(const std::string& text) override;
     std::string GetHelloMessage();
 };

@@ -17,7 +17,7 @@
 #define TAG "WS"
 
 // Hands out the board's connections and remembers the last TCP/TLS transport,
-// so that DiscardFailedWebsocket() can stop it before its WebSocket is freed.
+// so that DiscardWebsocket() can stop it before its WebSocket is freed.
 class WebsocketProtocol::TransportTracker : public NetworkInterface {
 public:
     // Forgets the remembered transport without touching it.
@@ -118,8 +118,15 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
 }
 
 void WebsocketProtocol::CloseAudioChannel(bool send_goodbye) {
-    (void)send_goodbye;  // Websocket doesn't need to send goodbye message
-    websocket_.reset();
+    if (websocket_ == nullptr) {
+        return;
+    }
+    if (send_goodbye) {
+        // Without a close frame, a server behind a proxy such as the Azure
+        // Container Apps ingress learns only 5 s later that the chat is over.
+        websocket_->Close();
+    }
+    DiscardWebsocket();
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
@@ -184,7 +191,7 @@ bool WebsocketProtocol::Connect(const std::string& url, const std::string& token
         if (connected) {
             return true;
         }
-        DiscardFailedWebsocket();
+        DiscardWebsocket();
 
         // A handshake without a reply is a Timeout with no native code; a TCP
         // or TLS connect timeout carries the esp-tls error and is not retried.
@@ -284,11 +291,13 @@ bool WebsocketProtocol::CreateWebsocket(const std::string& token) {
     return true;
 }
 
-void WebsocketProtocol::DiscardFailedWebsocket() {
-    // ~WebSocket() frees its buffers before its transport, and for a WebSocket
-    // that never connected it does not stop the transport first, so a late
-    // handshake reply could land in freed memory. Stop the transport (joining
-    // its receive task) while the WebSocket still exists.
+void WebsocketProtocol::DiscardWebsocket() {
+    // ~WebSocket() frees its buffers before its transport and stops the
+    // transport first only while connected_ is set: not after a failed
+    // handshake, and not when a close frame from the server has cleared it
+    // before the WebSocket is closed. Its receive task (a late handshake reply,
+    // the server dropping the connection) could then use freed memory. Stop the
+    // transport (joining its receive task) while the WebSocket still exists.
     if (auto transport = transports_->TakeLast()) {
         transport->Disconnect();
     }

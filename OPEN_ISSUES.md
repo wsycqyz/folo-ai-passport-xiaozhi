@@ -9,12 +9,19 @@ Things that could change the code later. Delete an entry when it is settled.
 - For now: These two parts rely on the build and on code review.
 - Needs: Say `把屏幕调到最暗` to the device: the screen should stay readable, and the device log should show `Set brightness to 10`. Say `把屏幕换成白色`: the assistant should answer that it cannot.
 
-## 2026-11-24: The bridge learns about 7 seconds late that the device ended a chat
+## 2026-11-24: After the server ends a chat, the device keeps the old connection until the next chat
 
-- Context: When a chat is ended on the device (OK key), the firmware drops the connection without sending a WebSocket close frame (`WebsocketProtocol::CloseAudioChannel`, as in upstream XiaoZhi). In six chats with the real device on 2026-11-24, the bridge logged the end of the session 6.5 to 11.5 seconds after the device had closed it. When the device reconnected sooner, the bridge ended the old session as "replaced by a new connection".
-- Open: Until the bridge notices, it keeps the Voice Live session open, and the session length in its log includes those seconds. Whether a close frame sent first would make the bridge notice at once was not tried.
-- For now: Left as is. Reconnecting 3 seconds after ending a chat worked: the device was listening again after 2.3 seconds.
-- Needs: Decide whether the firmware should send a close frame before it drops the connection. It changes the shared WebSocket transport, so both the WebSocket close and the server's own close need a test.
+- Context: When the server ends a chat (the bridge's idle timeout, a goodbye, the daily limit), the WebSocket library marks the connection as closed and the device returns to idle. The library does not answer the server's close frame and does not close the connection. The firmware keeps that WebSocket until the next chat starts, and `WebsocketProtocol::CreateWebsocket` then frees it without stopping its transport first. This is not new: the firmware behaved this way before the close frame was added. The coder noticed it while adding the close frame for chats that the device ends.
+- Open: If the server still has the connection open when the next chat starts, data arriving at that moment could reach freed memory. This was not observed. Until the next chat, the memory of the old connection stays allocated; how much was not measured.
+- For now: Unchanged. The bridge's session length is not affected: the bridge takes it before it closes the connection.
+- Needs: Decide whether the device should drop the connection as soon as the server closes it, as the MQTT transport does when the server says goodbye (`CloseAudioChannel(false)`). `WebsocketProtocol::DiscardWebsocket()` stops the transport before it frees the WebSocket. Test with a chat that the bridge ends, for example by saying `再见`.
+
+## 2026-11-24: The close frame is untested while the server is sending, and on the stock variant
+
+- Context: When the device ends a chat, it now sends a WebSocket close frame and then drops the connection at once, so that a server behind the Azure Container Apps ingress learns it without a 5-second delay. The frame carries no status code: the WebSocket library cannot send one. With the kids variant on the device on 2026-11-24, the bridge's session length matched the device's to within 0.1 seconds in four chats; before, the bridge logged the end of a session 6.5 to 11.5 seconds late. In those four chats the bridge sent no audio.
+- Open: If data from the server is still unread when the connection is shut down, lwIP resets the connection instead of closing it, and the close frame can be lost. The bridge then learns 5 seconds late, as before. The stock variant shares the code and was built, but not run on the device.
+- For now: Accepted: the worst case is the behavior before this change.
+- Needs: Nothing unless session ends in the bridge's log are late again; then check this first.
 
 ## 2026-11-24: Six emotion names show the default face
 

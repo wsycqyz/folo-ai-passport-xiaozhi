@@ -84,7 +84,7 @@ This document describes the WebSocket communication protocol between the device 
      - The device invokes `on_audio_channel_closed_()` and eventually returns to the idle state.
 
 6. **Closing the WebSocket connection**
-   - When the device wants to end the session, it calls `CloseAudioChannel()` to tear down the socket and returns to idle.
+   - When the device wants to end the session, it calls `CloseAudioChannel()`: it sends a WebSocket close frame without a status code, so that the server learns at once that the session is over, then tears down the socket without waiting for the server's close frame, and returns to idle.
    - The same callback chain runs if the server closes the socket first.
 
 ---
