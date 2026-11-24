@@ -44,6 +44,9 @@ void Backlight::RestoreBrightness() {
 }
 
 void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
+    if (brightness < min_brightness_) {
+        brightness = min_brightness_;
+    }
     if (brightness > 100) {
         brightness = 100;
     }

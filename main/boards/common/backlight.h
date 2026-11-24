@@ -15,6 +15,9 @@ public:
     void RestoreBrightness();
     void SetBrightness(uint8_t brightness, bool permanent = false);
     inline uint8_t brightness() const { return brightness_; }
+    // SetBrightness() raises a value below the minimum to the minimum.
+    inline void SetMinBrightness(uint8_t brightness) { min_brightness_ = brightness; }
+    inline uint8_t min_brightness() const { return min_brightness_; }
 
 protected:
     void OnTransitionTimer();
@@ -23,6 +26,7 @@ protected:
     esp_timer_handle_t transition_timer_ = nullptr;
     uint8_t brightness_ = 0;
     uint8_t target_brightness_ = 0;
+    uint8_t min_brightness_ = 0;
     uint8_t step_ = 1;
 };
 

@@ -2,6 +2,27 @@
 
 Things that could change the code later. Delete an entry when it is settled.
 
+## 2026-11-24: The brightness floor of the kids variant is untested by voice
+
+- Context: The kids variant no longer offers the assistant a tool to change the screen theme, reports no theme in the device status, and does not let the brightness go below 10. On the device on 2026-11-24, the stock image registered `self.screen.set_theme` at boot and the kids image did not, and in a chat the bridge logged the tools the kids device offers as `self_get_device_status`, `self_audio_speaker_set_volume` and `self_screen_set_brightness`.
+- Open: A brightness below 10 and the device status were not asked for: both need a spoken request, and the bridge logs only the tool names.
+- For now: These two parts rely on the build and on code review.
+- Needs: Say `把屏幕调到最暗` to the device: the screen should stay readable, and the device log should show `Set brightness to 10`. Say `把屏幕换成白色`: the assistant should answer that it cannot.
+
+## 2026-11-24: The bridge learns about 7 seconds late that the device ended a chat
+
+- Context: When a chat is ended on the device (OK key), the firmware drops the connection without sending a WebSocket close frame (`WebsocketProtocol::CloseAudioChannel`, as in upstream XiaoZhi). In six chats with the real device on 2026-11-24, the bridge logged the end of the session 6.5 to 11.5 seconds after the device had closed it. When the device reconnected sooner, the bridge ended the old session as "replaced by a new connection".
+- Open: Until the bridge notices, it keeps the Voice Live session open, and the session length in its log includes those seconds. Whether a close frame sent first would make the bridge notice at once was not tried.
+- For now: Left as is. Reconnecting 3 seconds after ending a chat worked: the device was listening again after 2.3 seconds.
+- Needs: Decide whether the firmware should send a close frame before it drops the connection. It changes the shared WebSocket transport, so both the WebSocket close and the server's own close need a test.
+
+## 2026-11-24: Six emotion names show the default face
+
+- Context: The bridge now sends one of XiaoZhi's 21 emotion names with each reply. The kids display has a face for 14 of them.
+- Open: `embarrassed`, `cool`, `relaxed`, `delicious`, `confident` and `silly` show the default face, like `neutral`.
+- For now: Left as is; the handoff from the bridge calls the current faces acceptable.
+- Needs: Decide whether these six should be mapped to eyes and mouths that already exist.
+
 ## 2026-11-24: The error for a server that never starts is untested
 
 - Context: The bridge scales to zero outside its warm windows, and the firmware now waits up to `CONFIG_SERVER_START_TIMEOUT_SEC` (90 seconds) for it to start. The kids variant was tested on the device against the scaled-to-zero bridge on 2026-11-24. At boot the version check got its answer after 53 seconds, and the device went to idle without an error. A chat started from the console connected on the fifth handshake attempt, 59 seconds after it started, and was listening 2 seconds later, without an error. A chat started with the OK key connected after 52 seconds and stayed open although OK was pressed again during the wait. With the bridge awake a chat connected in 1.5 seconds, without retries. The `waiting_for_server` frame of `KUI DEMO` shows `服务器正在开机，请稍候...` on two lines. The free memory lost to the closed attempts came back once their connections had expired.

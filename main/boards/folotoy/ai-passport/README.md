@@ -97,6 +97,10 @@ What it changes (`CONFIG_AI_PASSPORT_KIDS_UI`, implemented in `kids_display.cc`)
   shown. System messages (Wi-Fi setup instructions, the wait for a server that
   is starting, errors) use the same bubble.
 - **The volume keys show a bar** instead of a number.
+- **Voice tools** (MCP): the assistant gets no tool to change the screen theme
+  and the device status reports no theme, because the screen is always dark.
+  The brightness cannot be set below 10: the device has no brightness key to
+  bring a black screen back.
 - **Wi-Fi transmit power**: at boot the variant removes the stored value
   `wifi/max_tx_power = 8` (2 dBm). Version 3.3.3 of the `esp-wifi-connect`
   setup page stores that value by accident when its Advanced tab is saved on a

@@ -281,7 +281,8 @@ public:
 #if CONFIG_AI_PASSPORT_KIDS_UI
         FixWifiTxPower();
         // Backlight off (PWM duty 0) until the display has drawn its dark first frame.
-        GetBacklight();
+        // The device has no brightness key, so voice must not turn the screen off.
+        GetBacklight()->SetMinBrightness(10);
 #endif
         InitializeCodecI2c();
         InitializeSpi();

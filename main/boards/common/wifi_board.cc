@@ -313,7 +313,7 @@ std::string WifiBoard::GetDeviceStatusJson() {
         cJSON_AddNumberToObject(screen, "brightness", backlight->brightness());
     }
     if (auto display = board.GetDisplay(); display && display->height() > 64) {
-        if (auto theme = display->GetTheme()) {
+        if (auto theme = display->GetTheme(); theme && display->SupportsThemeSwitching()) {
             cJSON_AddStringToObject(screen, "theme", theme->name().c_str());
         }
     }

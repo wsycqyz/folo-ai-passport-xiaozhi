@@ -24,6 +24,7 @@ public:
     void ShowActivationCode(const char* code, const char* message) override;
     void ClearActivationCode() override;
     void SetTheme(Theme* theme) override;
+    bool SupportsThemeSwitching() const override { return false; }
     void SetHideSubtitle(bool hide) override;
     void UpdateStatusBar(bool update_all = false) override;
     bool AddTextGlyphs(const std::vector<TextGlyph>& glyphs, uint8_t bpp) override;
