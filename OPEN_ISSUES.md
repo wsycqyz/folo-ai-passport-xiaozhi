@@ -2,13 +2,6 @@
 
 Things that could change the code later. Delete an entry when it is settled.
 
-## 2026-11-24: The brightness floor of the kids variant is untested by voice
-
-- Context: The kids variant no longer offers the assistant a tool to change the screen theme, reports no theme in the device status, and does not let the brightness go below 10. On the device on 2026-11-24, the stock image registered `self.screen.set_theme` at boot and the kids image did not, and in a chat the bridge logged the tools the kids device offers as `self_get_device_status`, `self_audio_speaker_set_volume` and `self_screen_set_brightness`.
-- Open: A brightness below 10 and the device status were not asked for: both need a spoken request, and the bridge logs only the tool names.
-- For now: These two parts rely on the build and on code review.
-- Needs: Say `把屏幕调到最暗` to the device: the screen should stay readable, and the device log should show `Set brightness to 10`. Say `把屏幕换成白色`: the assistant should answer that it cannot.
-
 ## 2026-11-24: After the server ends a chat, the device does not close the connection
 
 - Context: When the server ends a chat (the bridge's idle timeout, a goodbye, the daily limit), the WebSocket library marks the connection as closed and the device returns to idle. The library does not answer the server's close frame and does not close the connection. The bridge does not wait for the answer: its server (uvicorn) goes on at once and closes the connection itself 10 seconds later. This was read in the server's code on 2026-11-24 and not watched on the device. The firmware keeps its WebSocket until the next chat starts, and `WebsocketProtocol::CreateWebsocket` then frees it without stopping its transport first. This is not new: the firmware behaved this way before the close frame was added. The coder noticed it while adding the close frame for chats that the device ends.
