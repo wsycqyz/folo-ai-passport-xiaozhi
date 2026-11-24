@@ -2,18 +2,18 @@
 
 Things that could change the code later. Delete an entry when it is settled.
 
-## 2026-11-24: No spoken conversation was tested on the kids variant
+## 2026-11-24: Glyphs pushed by a server are untested on the kids variant
 
-- Context: `ai-passport-kids` was checked on the device with a boot log, a scripted gallery of 23 captured screens, and one real session that reached the listening state. Nobody spoke and no key was pressed.
-- Open: How real transcribed words look in the bubble, whether the talking mouth and the pill follow real speech, the sound at 16 kHz, the volume bar on real key presses, whether the first frame is dark to the eye, and glyphs pushed by a server.
-- For now: The gallery drives the display through the same code path as real messages. The image is flashed on the device, with the volume left at 1.
-- Needs: One conversation on the device, and a note of anything that looks or sounds wrong.
+- Context: A live test on 2026-11-24 settled the rest of the first device check. In four chat sessions through a self-hosted server, the speaker's words were transcribed exactly, wrapped over four lines and scrolled; the pill (`我在听`, `请稍等`, `我在说`) and the mouth followed the speech; the assistant's words never appeared; the sound at 16 kHz was clear, with no clipped start or stutter; the volume keys moved the bar; the first frame was dark; OK stopped a long answer at once; and the server's two-minute idle close brought back the idle screen. That server pushes no glyphs.
+- Open: How her words look when a server pushes glyphs (`glyph_push`) for characters that the built-in font lacks.
+- For now: The kids display keeps a pushed batch until the next message and applies it only to her words.
+- Needs: A test with a server that pushes glyphs, if one is ever used.
 
 ## 2026-11-24: `请稍等` can stay on screen when no answer follows
 
 - Context: Review finding. Once her words arrive, the pill shows `请稍等` and the mascot looks up until the assistant starts to speak.
 - Open: If a server sends her transcript but no reply (a failed or filtered response), the screen keeps asking her to wait although the device is listening.
-- For now: Nothing. The next thing she says replaces the text.
+- For now: Nothing. The next thing she says replaces the text. Not seen in the 2026-11-24 live test, where every utterance got an answer.
 - Needs: Decide whether to return to the listening prompt after a timeout of about 10 seconds.
 
 ## 2026-11-24: A server alert hides her words until the chat ends
@@ -37,12 +37,12 @@ Things that could change the code later. Delete an entry when it is settled.
 - For now: Code-drawn art, 237 KB in flash.
 - Needs: Ask for generated or supplied artwork if wanted. The patch layout (stage, eyes, mouth, effects) takes any art of the same size.
 
-## 2026-11-24: After a quick restart the device can end up in Wi-Fi setup
+## 2026-11-24: After a restart the device can end up in Wi-Fi setup
 
-- Context: After a reset without a clean disconnect, the home access point refused the device for 35 to 60 seconds or more. The firmware gives up after 60 seconds and opens Wi-Fi setup mode, where it stays until it is restarted.
-- Open: A child who switches the device off and on quickly may land on the setup screen.
-- For now: Unchanged common behaviour (`WifiBoard::OnWifiConnectTimeout`). A restart a few minutes later connects in under a second.
-- Needs: Decide whether the kids variant should keep retrying the saved network instead of staying in setup mode.
+- Context: When the device restarts without a clean disconnect (switched off and on, or reset), the home access point does not let it back in at once. Measured on 2026-11-24: after a reset the access point first refused the association temporarily (`Association refused temporarily ... comeback time`), as access points with PMF (802.11w) do while a station still holds a protected association, and then ignored every authentication until 34 seconds after the reset (36 seconds after a power-on). The firmware then paused 10 seconds and scanned again, its next attempt connected at once, and the connection timer stopped at 45 and 48 seconds. The firmware gives up after 60 seconds and opens Wi-Fi setup mode, where it stays until it is restarted.
+- Open: A child who switches the device off and on can land on the setup screen; the margin was 12 to 15 seconds.
+- For now: Unchanged common behaviour (`WifiBoard::OnWifiConnectTimeout`, `CONNECT_TIMEOUT_SEC = 60`). A restart a few minutes later connects in under a second.
+- Needs: Decide whether the kids variant should keep retrying the saved network instead of opening setup mode, or whether the access point's settings should change.
 
 ## 2026-11-24: The Wi-Fi setup page stores 2 dBm by accident
 
