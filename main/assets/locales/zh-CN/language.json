@@ -28,7 +28,7 @@
         "SERVER_NOT_CONNECTED": "无法连接服务，请稍后再试",
         "SERVER_TIMEOUT": "等待响应超时",
         "SERVER_ERROR": "发送失败，请检查网络",
-        "WAITING_FOR_SERVER": "正在等待服务器开机，请稍候...",
+        "WAITING_FOR_SERVER": "服务器正在开机，请稍候...",
         "CONNECT_TO_HOTSPOT": "手机连接热点 ",
         "ACCESS_VIA_BROWSER": "，浏览器访问 ",
         "WIFI_CONFIG_MODE": "配网模式",

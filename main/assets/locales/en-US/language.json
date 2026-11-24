@@ -31,7 +31,7 @@
         "SERVER_NOT_CONNECTED": "Unable to connect to service, please try again later",
         "SERVER_TIMEOUT": "Waiting for response timeout",
         "SERVER_ERROR": "Sending failed, please check the network",
-        "WAITING_FOR_SERVER": "Waiting for the server to start, please wait...",
+        "WAITING_FOR_SERVER": "The server is starting, please wait...",
         "CONNECT_TO_HOTSPOT": "Hotspot: ",
         "ACCESS_VIA_BROWSER": " Config URL: ",
         "WIFI_CONFIG_MODE": "Wi-Fi Configuration Mode",

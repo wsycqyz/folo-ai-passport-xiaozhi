@@ -53,7 +53,7 @@ behaviour):
 
 - **Starting a chat**: each time the 10-second WebSocket handshake wait runs
   out, the device connects again, and from the first retry it shows
-  `正在等待服务器开机，请稍候...`. Other connection errors are reported at
+  `服务器正在开机，请稍候...`. Other connection errors are reported at
   once. A server that never answers is reported after about 100 seconds.
 - **At boot**: the version check waits up to 90 seconds for an answer, instead
   of showing an error and retrying after 30.

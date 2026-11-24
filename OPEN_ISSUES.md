@@ -2,12 +2,12 @@
 
 Things that could change the code later. Delete an entry when it is settled.
 
-## 2026-11-24: Waiting for a server that starts on demand is untested on the device
+## 2026-11-24: The OK key during a wait for a starting server is untested
 
-- Context: The bridge now scales to zero outside its warm windows, and a cold start took 48 to 54 seconds on 2026-11-24, while the firmware gave up on the WebSocket handshake after 10 seconds and on the boot-time version check after 30. The firmware now waits up to `CONFIG_SERVER_START_TIMEOUT_SEC` (90 seconds): it connects again after each 10-second handshake wait and shows `正在等待服务器开机，请稍候...`, the version check waits up to 90 seconds, and OK is ignored while connecting. A script that connects the way the firmware does reached the scaled-to-zero bridge on 2026-11-24 after 53.8 seconds, on its sixth attempt. Both variants build.
-- Open: None of it has run on the device: a chat started outside a warm window, a boot outside a window, the `waiting_for_server` frame of `KUI DEMO`, and the error after about 100 seconds when the server never answers.
-- For now: The host test checks only that the new message can be drawn with the built-in font.
-- Needs: A device test outside a warm window, at least 6 minutes after the bridge was last used.
+- Context: The bridge scales to zero outside its warm windows, and the firmware now waits up to `CONFIG_SERVER_START_TIMEOUT_SEC` (90 seconds) for it to start. The kids variant was tested on the device against the scaled-to-zero bridge on 2026-11-24. At boot the version check got its answer after 53 seconds, and the device went to idle without an error. A chat started from the console connected on the fifth handshake attempt, 59 seconds after it started, and was listening 2 seconds later, without an error. With the bridge awake a chat connected in 1.5 seconds, without retries. The `waiting_for_server` frame of `KUI DEMO` shows `服务器正在开机，请稍候...` on two lines. The free memory lost to the closed attempts came back once their connections had expired.
+- Open: The test started the chats from the console, which skips the OK key handler, so a press during the wait (which should be ignored) was not tried. The screen was not captured during a real wait, because the console is not read while the device connects. The error after about 100 seconds, for a server that never answers, was not produced.
+- For now: These parts rely on code review.
+- Needs: Outside a warm window, at least 6 minutes after the bridge was last used, press OK, then press it again a few times while the device waits; the chat should still open.
 
 ## 2026-11-24: The volume keys wait while a chat connects
 

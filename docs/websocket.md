@@ -18,7 +18,7 @@ This document describes the WebSocket communication protocol between the device 
      - Reads the WebSocket URL from settings.
      - Sets the request headers (`Authorization`, `Protocol-Version`, `Device-Id`, `Client-Id`).
      - Calls `Connect()` to establish the WebSocket connection.
-     - `Connect()` waits 10 seconds for the server to answer the handshake. On a timeout the device reconnects until the server answers or `CONFIG_SERVER_START_TIMEOUT_SEC` (default 90 seconds) has passed, and from the first timeout it shows "Waiting for the server to start". This is for servers that scale to zero: they accept the connection at once and hold the handshake while they start. Other connection errors fail at once.
+     - `Connect()` waits 10 seconds for the server to answer the handshake. On a timeout the device reconnects until the server answers or `CONFIG_SERVER_START_TIMEOUT_SEC` (default 90 seconds) has passed, and from the first timeout it shows "The server is starting". This is for servers that scale to zero: they accept the connection at once and hold the handshake while they start. Other connection errors fail at once.
 
 3. **Device sends a "hello" message**
    - Once connected, the device sends a JSON message. Example:

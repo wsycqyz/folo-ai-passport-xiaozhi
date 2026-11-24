@@ -18,7 +18,7 @@
      - 根据配置获取 WebSocket URL
      - 设置若干请求头（`Authorization`, `Protocol-Version`, `Device-Id`, `Client-Id`）  
      - 调用 `Connect()` 与服务器建立 WebSocket 连接  
-     - `Connect()` 最多等待 10 秒让服务器回复握手。超时后设备会重新连接，直到服务器回复或超过 `CONFIG_SERVER_START_TIMEOUT_SEC`（默认 90 秒），并从第一次超时起显示"正在等待服务器开机"。这适用于缩容到零的服务器：它们立即接受连接，并在启动期间挂起握手。其他连接错误会立即失败。  
+     - `Connect()` 最多等待 10 秒让服务器回复握手。超时后设备会重新连接，直到服务器回复或超过 `CONFIG_SERVER_START_TIMEOUT_SEC`（默认 90 秒），并从第一次超时起显示"服务器正在开机"。这适用于缩容到零的服务器：它们立即接受连接，并在启动期间挂起握手。其他连接错误会立即失败。  
 
 3. **设备端发送 "hello" 消息**  
    - 连接成功后，设备会发送一条 JSON 消息，示例结构如下：  
