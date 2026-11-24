@@ -553,6 +553,10 @@ void Application::InitializeProtocol() {
 
     protocol_->OnConnected([this]() { DismissAlert(); });
 
+    // Runs in the main task while OpenAudioChannel() waits for the server to start.
+    protocol_->OnWaitingForServer(
+        [display]() { display->SetChatMessage("system", Lang::Strings::WAITING_FOR_SERVER); });
+
     protocol_->OnNetworkError([this](const std::string& message) {
         last_error_message_ = message;
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
@@ -564,8 +568,11 @@ void Application::InitializeProtocol() {
         }
     });
 
-    protocol_->OnAudioChannelOpened([this, codec, &board]() {
+    protocol_->OnAudioChannelOpened([this, codec, display, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+        // Remove the WAITING_FOR_SERVER message, if any: the kids UI would keep
+        // a system message over the child's words for the whole conversation.
+        display->SetChatMessage("system", "");
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG,
                      "Server sample rate %d does not match device output sample rate %d, "

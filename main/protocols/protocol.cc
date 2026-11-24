@@ -40,6 +40,10 @@ void Protocol::OnAudioChannelClosed(std::function<void()> callback) {
     on_audio_channel_closed_ = callback;
 }
 
+void Protocol::OnWaitingForServer(std::function<void()> callback) {
+    on_waiting_for_server_ = callback;
+}
+
 void Protocol::OnNetworkError(std::function<void(const std::string& message)> callback) {
     on_network_error_ = callback;
 }

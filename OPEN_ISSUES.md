@@ -2,6 +2,20 @@
 
 Things that could change the code later. Delete an entry when it is settled.
 
+## 2026-11-24: Waiting for a server that starts on demand is untested on the device
+
+- Context: The bridge now scales to zero outside its warm windows, and a cold start took 48 to 54 seconds on 2026-11-24, while the firmware gave up on the WebSocket handshake after 10 seconds and on the boot-time version check after 30. The firmware now waits up to `CONFIG_SERVER_START_TIMEOUT_SEC` (90 seconds): it connects again after each 10-second handshake wait and shows `正在等待服务器开机，请稍候...`, the version check waits up to 90 seconds, and OK is ignored while connecting. A script that connects the way the firmware does reached the scaled-to-zero bridge on 2026-11-24 after 53.8 seconds, on its sixth attempt. Both variants build.
+- Open: None of it has run on the device: a chat started outside a warm window, a boot outside a window, the `waiting_for_server` frame of `KUI DEMO`, and the error after about 100 seconds when the server never answers.
+- For now: The host test checks only that the new message can be drawn with the built-in font.
+- Needs: A device test outside a warm window, at least 6 minutes after the bridge was last used.
+
+## 2026-11-24: The volume keys wait while a chat connects
+
+- Context: Every key press is scheduled onto the main task, and opening a chat blocks that task, for about a minute when the server has to start first. OK is now ignored while connecting.
+- Open: UP and DOWN pressed during that time take effect only when the connection is made or fails, all at once.
+- For now: Left as is.
+- Needs: Decide whether the volume keys should act at once (which means touching the codec from the button task) or be ignored while connecting.
+
 ## 2026-11-24: Glyphs pushed by a server are untested on the kids variant
 
 - Context: A live test on 2026-11-24 settled the rest of the first device check. In four chat sessions through a self-hosted server, the speaker's words were transcribed exactly, wrapped over four lines and scrolled; the pill (`我在听`, `请稍等`, `我在说`) and the mouth followed the speech; the assistant's words never appeared; the sound at 16 kHz was clear, with no clipped start or stutter; the volume keys moved the bar; the first frame was dark; OK stopped a long answer at once; and the server's two-minute idle close brought back the idle screen. That server pushes no glyphs.
@@ -55,5 +69,5 @@ Things that could change the code later. Delete an entry when it is settled.
 
 - Context: `python -m unittest discover -s scripts/tests` has 41 failing or erroring entries on `main`, because the tests refer to boards that this repository removed.
 - Open: The suite cannot serve as a gate.
-- For now: The new `scripts/tests/test_kids_ui.py` passes on its own, and the 41 old entries are unchanged.
+- For now: The new `scripts/tests/test_kids_ui.py` and `scripts/tests/test_locales.py` pass on their own, and the 41 old entries are unchanged.
 - Needs: Decide whether to prune or fix the old tests.

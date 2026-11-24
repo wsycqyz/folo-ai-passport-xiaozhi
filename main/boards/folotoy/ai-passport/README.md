@@ -42,6 +42,25 @@ The three physical keys map to XiaoZhi's voice-assistant actions:
 Because the ladder shares one ADC pin, XiaoZhi reads it as three
 independent ADC buttons (the same pattern as the ESP-BOX-Lite).
 
+## Servers that start on demand
+
+A server that scales to zero, such as an Azure Container App without a minimum
+replica, accepts a connection at once but answers only after it has started.
+On 2026-11-24 such a cold start took 48 to 54 seconds, while the firmware gave
+up after 10. Both variants now wait for the server, up to
+`CONFIG_SERVER_START_TIMEOUT_SEC` (default 90 seconds; 0 restores the old
+behaviour):
+
+- **Starting a chat**: each time the 10-second WebSocket handshake wait runs
+  out, the device connects again, and from the first retry it shows
+  `正在等待服务器开机，请稍候...`. Other connection errors are reported at
+  once. A server that never answers is reported after about 100 seconds.
+- **At boot**: the version check waits up to 90 seconds for an answer, instead
+  of showing an error and retrying after 30.
+- **OK is ignored while connecting.** The main task is busy until the
+  connection is made, and a press queued behind it would close the chat as soon
+  as it opened.
+
 ## Notes / calibration
 
 - Display orientation, color inversion and the backlight PWM polarity were
@@ -75,8 +94,8 @@ What it changes (`CONFIG_AI_PASSPORT_KIDS_UI`, implemented in `kids_display.cc`)
   `请稍等` (wait), `我在说` (speaking), `出错了` (error).
 - **A speech bubble shows only the child's own words**, wrapped over three or
   four lines; longer text scrolls by itself. The assistant's text is never
-  shown. System messages (Wi-Fi setup instructions, errors) use the same
-  bubble.
+  shown. System messages (Wi-Fi setup instructions, the wait for a server that
+  is starting, errors) use the same bubble.
 - **The volume keys show a bar** instead of a number.
 - **Wi-Fi transmit power**: at boot the variant removes the stored value
   `wifi/max_tx_power = 8` (2 dBm). Version 3.3.3 of the `esp-wifi-connect`

@@ -275,6 +275,9 @@ void KidsDisplay::RunDemo() {
     SetChatMessage("system", "");
     DemoCapture("connecting");
 
+    SetChatMessage("system", Lang::Strings::WAITING_FOR_SERVER);
+    DemoCapture("waiting_for_server");
+
     inject(kDeviceStateIdle);
     SetStatus(ClockText().c_str());
     ClearChatMessages();

@@ -27,6 +27,7 @@
         "SERVER_NOT_CONNECTED": "無法連接服務，請稍後再試",
         "SERVER_TIMEOUT": "等待響應超時",
         "SERVER_ERROR": "發送失敗，請檢查網絡",
+        "WAITING_FOR_SERVER": "正在等待伺服器開機，請稍候...",
         "CONNECT_TO_HOTSPOT": "手機連接WiFi ",
         "ACCESS_VIA_BROWSER": "，瀏覽器訪問 ",
         "WIFI_CONFIG_MODE": "網路設定模式",

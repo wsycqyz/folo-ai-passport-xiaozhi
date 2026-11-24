@@ -7,12 +7,58 @@
 #include <esp_log.h>
 #include <arpa/inet.h>
 #include <cJSON.h>
+#include <freertos/task.h>
+#include <network_interface.h>
+#include <chrono>
 #include <cstring>
+#include <utility>
 #include "assets/lang_config.h"
 
 #define TAG "WS"
 
-WebsocketProtocol::WebsocketProtocol() { event_group_handle_ = xEventGroupCreate(); }
+// Hands out the board's connections and remembers the last TCP/TLS transport,
+// so that DiscardFailedWebsocket() can stop it before its WebSocket is freed.
+class WebsocketProtocol::TransportTracker : public NetworkInterface {
+public:
+    // Forgets the remembered transport without touching it.
+    void Reset(NetworkInterface* network) {
+        network_ = network;
+        last_ = nullptr;
+    }
+    Tcp* TakeLast() { return std::exchange(last_, nullptr); }
+
+    std::unique_ptr<Http> CreateHttp(int connect_id) override {
+        return network_->CreateHttp(connect_id);
+    }
+    std::unique_ptr<Tcp> CreateTcp(int connect_id) override {
+        return Track(network_->CreateTcp(connect_id));
+    }
+    std::unique_ptr<Tcp> CreateSsl(int connect_id) override {
+        return Track(network_->CreateSsl(connect_id));
+    }
+    std::unique_ptr<Udp> CreateUdp(int connect_id) override {
+        return network_->CreateUdp(connect_id);
+    }
+    std::unique_ptr<Mqtt> CreateMqtt(int connect_id) override {
+        return network_->CreateMqtt(connect_id);
+    }
+    std::unique_ptr<WebSocket> CreateWebSocket(int connect_id) override {
+        return std::make_unique<WebSocket>(this, connect_id);
+    }
+
+private:
+    std::unique_ptr<Tcp> Track(std::unique_ptr<Tcp> tcp) {
+        last_ = tcp.get();
+        return tcp;
+    }
+
+    NetworkInterface* network_ = nullptr;
+    Tcp* last_ = nullptr;
+};
+
+WebsocketProtocol::WebsocketProtocol() : transports_(std::make_unique<TransportTracker>()) {
+    event_group_handle_ = xEventGroupCreate();
+}
 
 WebsocketProtocol::~WebsocketProtocol() { vEventGroupDelete(event_group_handle_); }
 
@@ -87,18 +133,88 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     error_occurred_ = false;
 
-    auto network = Board::GetInstance().GetNetwork();
-    websocket_ = network->CreateWebSocket(1);
+    if (!token.empty()) {
+        // If token not has a space, add "Bearer " prefix
+        if (token.find(" ") == std::string::npos) {
+            token = "Bearer " + token;
+        }
+    }
+
+    if (!Connect(url, token)) {
+        return false;
+    }
+
+    // Send hello message to describe the client
+    auto message = GetHelloMessage();
+    if (!SendText(message)) {
+        return false;
+    }
+
+    // Wait for server hello
+    EventBits_t bits =
+        xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE,
+                            pdFALSE, pdMS_TO_TICKS(10000));
+    if (!(bits & WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT)) {
+        ESP_LOGE(TAG, "Failed to receive server hello");
+        SetError(Lang::Strings::SERVER_TIMEOUT);
+        return false;
+    }
+
+    if (on_audio_channel_opened_ != nullptr) {
+        on_audio_channel_opened_();
+    }
+
+    return true;
+}
+
+bool WebsocketProtocol::Connect(const std::string& url, const std::string& token) {
+    // A server that scales to zero accepts the connection at once but holds the
+    // handshake until it has started (48 s on Azure Container Apps). WebSocket::
+    // Connect() stops waiting for the handshake after 10 s, so reconnect until
+    // the server is up or CONFIG_SERVER_START_TIMEOUT_SEC has passed.
+    const auto started = std::chrono::steady_clock::now();
+    const auto give_up_at = started + std::chrono::seconds(CONFIG_SERVER_START_TIMEOUT_SEC);
+    for (int attempt = 1;; attempt++) {
+        if (!CreateWebsocket(token)) {
+            return false;
+        }
+
+        ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
+        auto connected = websocket_->Connect(url.c_str());
+        if (connected) {
+            return true;
+        }
+        DiscardFailedWebsocket();
+
+        // A handshake without a reply is a Timeout with no native code; a TCP
+        // or TLS connect timeout carries the esp-tls error and is not retried.
+        const auto now = std::chrono::steady_clock::now();
+        if (connected.error() != NetworkError::Timeout() || now >= give_up_at) {
+            ESP_LOGE(TAG, "Failed to connect to websocket server: %s",
+                     connected.error().ToString().c_str());
+            SetError(Lang::Strings::SERVER_NOT_CONNECTED, url);
+            return false;
+        }
+        ESP_LOGW(TAG, "No handshake reply after %ld s (attempt %d); the server may be starting",
+                 (long)std::chrono::duration_cast<std::chrono::seconds>(now - started).count(),
+                 attempt);
+        if (attempt == 1 && on_waiting_for_server_ != nullptr) {
+            on_waiting_for_server_();
+        }
+        // Each attempt already waited 10 s; this only guards against a fast failure loop.
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+bool WebsocketProtocol::CreateWebsocket(const std::string& token) {
+    transports_->Reset(Board::GetInstance().GetNetwork());
+    websocket_ = transports_->CreateWebSocket(1);
     if (websocket_ == nullptr) {
         ESP_LOGE(TAG, "Failed to create websocket");
         return false;
     }
 
     if (!token.empty()) {
-        // If token not has a space, add "Bearer " prefix
-        if (token.find(" ") == std::string::npos) {
-            token = "Bearer " + token;
-        }
         websocket_->SetHeader("Authorization", token.c_str());
     }
     websocket_->SetHeader("Protocol-Version", std::to_string(version_).c_str());
@@ -165,35 +281,18 @@ bool WebsocketProtocol::OpenAudioChannel() {
         }
     });
 
-    ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
-    if (auto connected = websocket_->Connect(url.c_str()); !connected) {
-        ESP_LOGE(TAG, "Failed to connect to websocket server: %s",
-                 connected.error().ToString().c_str());
-        SetError(Lang::Strings::SERVER_NOT_CONNECTED, url);
-        return false;
-    }
-
-    // Send hello message to describe the client
-    auto message = GetHelloMessage();
-    if (!SendText(message)) {
-        return false;
-    }
-
-    // Wait for server hello
-    EventBits_t bits =
-        xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE,
-                            pdFALSE, pdMS_TO_TICKS(10000));
-    if (!(bits & WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT)) {
-        ESP_LOGE(TAG, "Failed to receive server hello");
-        SetError(Lang::Strings::SERVER_TIMEOUT);
-        return false;
-    }
-
-    if (on_audio_channel_opened_ != nullptr) {
-        on_audio_channel_opened_();
-    }
-
     return true;
+}
+
+void WebsocketProtocol::DiscardFailedWebsocket() {
+    // ~WebSocket() frees its buffers before its transport, and for a WebSocket
+    // that never connected it does not stop the transport first, so a late
+    // handshake reply could land in freed memory. Stop the transport (joining
+    // its receive task) while the WebSocket still exists.
+    if (auto transport = transports_->TakeLast()) {
+        transport->Disconnect();
+    }
+    websocket_.reset();
 }
 
 std::string WebsocketProtocol::GetHelloMessage() {

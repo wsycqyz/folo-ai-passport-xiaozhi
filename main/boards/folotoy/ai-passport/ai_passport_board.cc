@@ -21,6 +21,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include <atomic>
+
 #define TAG "AiPassport"
 
 // Physical keys share one ADC pin through a resistor ladder (see config.h).
@@ -38,6 +40,7 @@ private:
     adc_oneshot_unit_handle_t adc_handle_ = nullptr;
     LcdDisplay* display_;
     Cw2017BatteryMonitor* battery_;
+    std::atomic<bool> ok_pressed_while_connecting_{false};
 
     void InitializeCodecI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -150,7 +153,21 @@ private:
         });
 
         auto ok = adc_button_[kAdcButtonOk];
+        // Opening a chat blocks the main task, for about a minute when the
+        // server has to start first. A press queued behind it would close the
+        // chat as soon as it opens, so a press that starts while connecting is
+        // ignored. The click is reported only after release (and the double
+        // click window), when the chat may already be open, so latch the state
+        // at press down.
+        ok->OnPressDown([this]() {
+            ok_pressed_while_connecting_ =
+                Application::GetInstance().GetDeviceState() == kDeviceStateConnecting;
+        });
         ok->OnClick([this]() {
+            if (ok_pressed_while_connecting_ ||
+                Application::GetInstance().GetDeviceState() == kDeviceStateConnecting) {
+                return;
+            }
             Application::GetInstance().Schedule([this]() { ToggleChat(); });
         });
     }

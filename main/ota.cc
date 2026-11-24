@@ -89,6 +89,9 @@ NetworkResult<> Ota::CheckVersion() {
     }
 
     auto http = SetupHttp();
+    // A server that is starting from zero (see CONFIG_SERVER_START_TIMEOUT_SEC)
+    // answers only once it is up; wait for it instead of the default 30 s.
+    http->SetTimeout(std::max(30, CONFIG_SERVER_START_TIMEOUT_SEC) * 1000);
 
     std::string data = board.GetSystemInfoJson();
     std::string method = data.length() > 0 ? "POST" : "GET";

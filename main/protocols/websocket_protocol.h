@@ -22,11 +22,17 @@ public:
     bool IsAudioChannelOpened() const override;
 
 private:
+    class TransportTracker;
+
     EventGroupHandle_t event_group_handle_;
+    std::unique_ptr<TransportTracker> transports_;
     std::unique_ptr<WebSocket> websocket_;
     int version_ = 1;
 
     void ParseServerHello(const cJSON* root);
+    bool Connect(const std::string& url, const std::string& token);
+    bool CreateWebsocket(const std::string& token);
+    void DiscardFailedWebsocket();
     bool SendText(const std::string& text) override;
     std::string GetHelloMessage();
 };

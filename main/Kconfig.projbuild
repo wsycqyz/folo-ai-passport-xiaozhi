@@ -6,6 +6,18 @@ config OTA_URL
     help
         The application will access this URL to check for new firmwares and server address.
 
+config SERVER_START_TIMEOUT_SEC
+    int "Seconds to wait for a server that is starting up"
+    default 90
+    range 0 600
+    help
+        A server that scales to zero, such as an Azure Container App without a
+        minimum replica, accepts a connection at once but answers only after it
+        has started, which can take about a minute. The device waits up to this
+        long: for the version check at boot, and for the WebSocket handshake
+        when a conversation starts, reconnecting each time the 10-second
+        handshake wait runs out. 0 gives up after the first wait, as before.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE
