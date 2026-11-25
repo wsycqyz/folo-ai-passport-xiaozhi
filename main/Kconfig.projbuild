@@ -18,6 +18,17 @@ config SERVER_START_TIMEOUT_SEC
         when a conversation starts, reconnecting each time the 10-second
         handshake wait runs out. 0 gives up after the first wait, as before.
 
+config SKIP_VERSION_CHECK_AFTER_DEEP_SLEEP
+    bool "Skip the version check after a wake from deep sleep"
+    default n
+    help
+        After a wake from deep sleep the device goes on with the server that
+        the last version check of this power session selected, without asking
+        the OTA server again, so a server that scales to zero is not started
+        by a wake. A power-on, a reset or the Wi-Fi setup still checks. A new
+        firmware version, new server settings or an activation change are
+        then seen only at the next power-on or reset.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE

@@ -11,7 +11,8 @@
                 "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
                 "CONFIG_LV_USE_QRCODE=n",
                 "CONFIG_USE_ESP_WAKE_WORD=n",
-                "CONFIG_AI_PASSPORT_KIDS_UI=y"
+                "CONFIG_AI_PASSPORT_KIDS_UI=y",
+                "CONFIG_SKIP_VERSION_CHECK_AFTER_DEEP_SLEEP=y"
             ]
         },
         {
@@ -23,6 +24,7 @@
                 "CONFIG_LV_USE_QRCODE=n",
                 "CONFIG_USE_ESP_WAKE_WORD=n",
                 "CONFIG_AI_PASSPORT_KIDS_UI=y",
+                "CONFIG_SKIP_VERSION_CHECK_AFTER_DEEP_SLEEP=y",
                 "CONFIG_AI_PASSPORT_IDLE_DEEP_SLEEP=y"
             ]
         }

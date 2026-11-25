@@ -57,6 +57,9 @@ behaviour):
   once. A server that never answers is reported after about 100 seconds.
 - **At boot**: the version check waits up to 90 seconds for an answer, instead
   of showing an error and retrying after 30.
+- **After a wake from deep sleep** the kids variant does not ask for the
+  version (see [Rest and sleep](#rest-and-sleep)), so a wake does not start
+  the server. The first chat after it does, and waits as described above.
 - **OK is ignored while connecting.** The main task is busy until the
   connection is made, and a press queued behind it would close the chat as soon
   as it opened.
@@ -129,8 +132,19 @@ this, and that `kids_art.c` matches the generator.
   power key cuts the power in hardware and the firmware cannot use it, so deep
   sleep is the lowest state the firmware can reach: Wi-Fi, the codec, the
   panel and the backlight are off. Any key wakes the device, which restarts
-  the firmware. On 2026-11-25 the idle screen was back 5 seconds after a key
-  press, when the access point and the server answered at once.
+  the firmware.
+- **A wake from deep sleep does not ask the server for the version.** Both
+  kids builds set `CONFIG_SKIP_VERSION_CHECK_AFTER_DEEP_SLEEP`, a common
+  option that is off by default. After a wake the device goes on with the
+  transport that the last version check since the power-on selected, and with
+  the settings stored then, so a wake does not start a server that scales to
+  zero. On 2026-11-25 the device was idle 2.6 seconds after a wake, when the
+  access point answered at once; before, the check alone took 21 to 53 seconds
+  when the server had to start. A power-on, a reset and a start through the
+  Wi-Fi setup check as before, and so does a wake when the last check failed.
+  Until the next power-on or reset the device does not learn of a new firmware
+  version or new server settings, and nothing sets its clock, which ran 0.6 %
+  fast in deep sleep, about 8.5 minutes a day (see `OPEN_ISSUES.md`).
 - **The key that wakes the device only wakes it.** For 3 seconds after a wake,
   clicks and long presses are ignored, because that key may still be held.
   Until the device has started, OK does not open the Wi-Fi setup; a start with
@@ -188,7 +202,7 @@ files; it needs only pyserial, so the ESP-IDF Python can run it.
 | `KUI DEMO` | `demo --out DIR` | Show a scripted gallery of every screen, stream each one, then restore the real state. Needs the idle state. |
 | `KUI CHAT` | `chat` | Toggle the chat, like the OK key. |
 | `KUI SLEEP [s]` | `sleep [--wake-after s]` | Enter deep sleep now, on either firmware. Any key wakes the device; with `s` it also wakes by itself after `s` seconds. Needs the idle state. |
-| `KUI INFO` | `info` | Print one line: uptime, reset reason (8 = wake from deep sleep), wake causes (0x80 = key, 0x10 = timer), device state (3 = idle), brightness, `asleep` (the mascot) and `autosleep` (1 = release firmware). |
+| `KUI INFO` | `info` | Print one line: uptime, reset reason (8 = wake from deep sleep), wake causes (0x80 = key, 0x10 = timer), device state (3 = idle), brightness, `asleep` (the mascot), `autosleep` (1 = release firmware) and `time` (the device's clock in seconds and milliseconds; it counts local time, so compare two readings instead of reading it as UTC). |
 
 The commands do not count as activity: the screen still dims while they are
 used, and release firmware still goes to sleep.

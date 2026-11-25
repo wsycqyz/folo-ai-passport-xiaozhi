@@ -12,13 +12,24 @@
 #include "websocket_protocol.h"
 
 #include <driver/gpio.h>
+#include <esp_app_desc.h>
+#include <esp_attr.h>
 #include <esp_log.h>
+#include <esp_system.h>
 #include <arpa/inet.h>
 #include <cJSON.h>
 #include <cstring>
 #include <limits>
 
 #define TAG "Application"
+
+#if CONFIG_SKIP_VERSION_CHECK_AFTER_DEEP_SLEEP
+// The transport that the last version check of this power session selected, or
+// kNone if that check failed. RTC memory keeps it through deep sleep; any other
+// reset clears it.
+enum class CheckedTransport : uint8_t { kNone, kMqtt, kWebsocket };
+static RTC_DATA_ATTR CheckedTransport checked_transport = CheckedTransport::kNone;
+#endif
 
 Application::Application() : notify_player_(audio_service_) {
     event_group_ = xEventGroupCreate();
@@ -296,6 +307,13 @@ void Application::HandleNetworkConnectedEvent() {
             ESP_LOGW(TAG, "Activation task already running");
             return;
         }
+#if CONFIG_SKIP_VERSION_CHECK_AFTER_DEEP_SLEEP
+        // A wake from deep sleep reuses the last check if it succeeded, but not
+        // after the Wi-Fi setup: its page can change the OTA address.
+        skip_version_check_ = state == kDeviceStateStarting &&
+                              esp_reset_reason() == ESP_RST_DEEPSLEEP &&
+                              checked_transport != CheckedTransport::kNone;
+#endif
 
         xTaskCreate(
             [](void* arg) {
@@ -346,7 +364,8 @@ void Application::HandleActivationDoneEvent() {
         display->ClearActivationCode();
         display->SetStatus(Lang::Strings::STANDBY);
         display->SetEmotion("neutral");
-        std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
+        std::string message =
+            std::string(Lang::Strings::VERSION) + esp_app_get_description()->version;
         display->ShowNotification(message.c_str());
         display->SetChatMessage("system", "");
     }
@@ -372,7 +391,22 @@ void Application::ActivationTask() {
     CheckAssetsVersion();
 
     // Check for new firmware version
+#if CONFIG_SKIP_VERSION_CHECK_AFTER_DEEP_SLEEP
+    if (skip_version_check_) {
+        ESP_LOGI(TAG, "Woke from deep sleep: version check skipped, using %s",
+                 checked_transport == CheckedTransport::kWebsocket ? "WebSocket" : "MQTT");
+    } else if (CheckNewVersion()) {
+        // InitializeProtocol() selects MQTT unless the answer has only a WebSocket section
+        checked_transport = !ota_->HasMqttConfig() && ota_->HasWebsocketConfig()
+                                ? CheckedTransport::kWebsocket
+                                : CheckedTransport::kMqtt;
+    } else {
+        // No answer, perhaps from an address set in the Wi-Fi setup: check at the next wake.
+        checked_transport = CheckedTransport::kNone;
+    }
+#else
     CheckNewVersion();
+#endif
 
     // Initialize the protocol
     InitializeProtocol();
@@ -441,7 +475,8 @@ void Application::CheckAssetsVersion() {
     display->SetEmotion("robot_2");
 }
 
-void Application::CheckNewVersion() {
+// Returns whether the check ended with an answer from the server.
+bool Application::CheckNewVersion() {
     const int MAX_RETRY = 10;
     int retry_count = 0;
     int retry_delay = 10;  // Initial retry delay in seconds
@@ -456,7 +491,7 @@ void Application::CheckNewVersion() {
             retry_count++;
             if (retry_count >= MAX_RETRY) {
                 ESP_LOGE(TAG, "Too many retries, exit version check");
-                return;
+                return false;
             }
 
             const auto& err = check.error();
@@ -494,7 +529,7 @@ void Application::CheckNewVersion() {
 
         if (ota_->HasNewVersion()) {
             if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
-                return;  // This line will never be reached after reboot
+                return true;  // This line will never be reached after reboot
             }
             // If upgrade failed, continue to normal operation
         }
@@ -533,6 +568,7 @@ void Application::CheckNewVersion() {
             break;
         }
     }
+    return true;
 }
 
 void Application::InitializeProtocol() {
@@ -542,9 +578,18 @@ void Application::InitializeProtocol() {
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
-    if (ota_->HasMqttConfig()) {
+    bool has_mqtt_config = ota_->HasMqttConfig();
+    bool has_websocket_config = ota_->HasWebsocketConfig();
+#if CONFIG_SKIP_VERSION_CHECK_AFTER_DEEP_SLEEP
+    if (skip_version_check_) {
+        // No answer to read: use the remembered transport, with its settings from NVS.
+        has_mqtt_config = checked_transport == CheckedTransport::kMqtt;
+        has_websocket_config = checked_transport == CheckedTransport::kWebsocket;
+    }
+#endif
+    if (has_mqtt_config) {
         protocol_ = std::make_unique<MqttProtocol>();
-    } else if (ota_->HasWebsocketConfig()) {
+    } else if (has_websocket_config) {
         protocol_ = std::make_unique<WebsocketProtocol>();
     } else {
         ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");

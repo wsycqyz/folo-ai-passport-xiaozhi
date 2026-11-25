@@ -149,6 +149,9 @@ private:
     bool has_server_time_ = false;
     bool aborted_ = false;
     bool assets_version_checked_ = false;
+#if CONFIG_SKIP_VERSION_CHECK_AFTER_DEEP_SLEEP
+    bool skip_version_check_ = false;  // Decided before the activation task starts
+#endif
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     bool pending_listening_start_ = false;  // Waiting for playback to drain before starting listening (auto mode)
     int clock_ticks_ = 0;
@@ -178,7 +181,7 @@ private:
 
     // Helper methods
     void CheckAssetsVersion();
-    void CheckNewVersion();
+    bool CheckNewVersion();
     void InitializeProtocol();
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
