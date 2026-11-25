@@ -64,6 +64,17 @@ behaviour):
   connection is made, and a press queued behind it would close the chat as soon
   as it opened.
 
+## Hidden Wi-Fi networks
+
+The device also joins a saved network that does not broadcast its name. The
+Wi-Fi component only finds networks in its wildcard scans, where such a
+network is missing, so when a scan found no saved network the board
+(`WifiBoard`, both variants) scans for each saved name directly; the component
+then sees the network and connects as usual. This takes longer: on 2026-11-25
+the device had its address 11 to 20 seconds after a start or a wake, against
+about 2.5 seconds on a network that broadcasts its name. After a lost
+connection it found the network again by the same scans.
+
 ## Notes / calibration
 
 - Display orientation, color inversion and the backlight PWM polarity were

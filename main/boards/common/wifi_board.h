@@ -5,12 +5,22 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <esp_timer.h>
+#include <esp_event.h>
+#include <string>
 
 class WifiBoard : public Board {
 protected:
     esp_timer_handle_t connect_timer_ = nullptr;
     bool in_config_mode_ = false;
     NetworkEventCallback network_event_callback_ = nullptr;
+
+    // SSID-directed scans so that saved networks with a hidden SSID are found
+    esp_timer_handle_t hidden_scan_timer_ = nullptr;
+    bool hidden_scan_active_ = false;
+    bool station_associated_ = false;
+    bool scan_missed_ = false;
+    size_t hidden_scan_index_ = 0;
+    std::string hidden_scan_ssid_;
 
     virtual std::string GetBoardJson() override;
 
@@ -35,6 +45,16 @@ protected:
      * WiFi connection timeout callback
      */
     static void OnWifiConnectTimeout(void* arg);
+
+    /**
+     * Wi-Fi events and the hidden SSID scan request, run in the default event loop task
+     */
+    static void OnWifiEvent(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+
+    /**
+     * Start an SSID-directed scan for the next saved SSID
+     */
+    void StartHiddenSsidScan();
 
 public:
     WifiBoard();

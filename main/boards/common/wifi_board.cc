@@ -11,6 +11,7 @@
 #include <esp_network.h>
 #include <esp_log.h>
 #include <esp_mac.h>
+#include <esp_wifi.h>
 #include <utility>
 
 #include <material_symbols.h>
@@ -26,6 +27,19 @@ static const char *TAG = "WifiBoard";
 // Connection timeout in seconds
 static constexpr int CONNECT_TIMEOUT_SEC = 60;
 
+// A hidden SSID is missing from the wildcard scans of the Wi-Fi component, so
+// when its last scan found no saved network the board scans for each saved
+// SSID by name; the component's scan-done handler then finds the network and
+// connects as usual. A new scan aborts a running one, so a directed scan
+// starts only after this long without a scan done: longer than the
+// full-channel scan the component may start right after a scan done.
+static constexpr int HIDDEN_SCAN_DELAY_SEC = 4;
+
+// Posted by the timer so that the scan starts in the event loop task, never
+// between a Wi-Fi event and the component's handling of it.
+ESP_EVENT_DEFINE_BASE(WIFI_BOARD_EVENT);
+static constexpr int32_t WIFI_BOARD_EVENT_HIDDEN_SCAN = 0;
+
 WifiBoard::WifiBoard() {
     // Create connection timeout timer
     esp_timer_create_args_t timer_args = {
@@ -36,12 +50,30 @@ WifiBoard::WifiBoard() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&timer_args, &connect_timer_);
+
+    // Like the component's scan timer, it may wake the CPU from light sleep
+    esp_timer_create_args_t hidden_scan_timer_args = {
+        .callback = [](void* arg) {
+            esp_event_post(WIFI_BOARD_EVENT, WIFI_BOARD_EVENT_HIDDEN_SCAN, nullptr, 0, 0);
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "hidden_scan_timer",
+        .skip_unhandled_events = false
+    };
+    esp_timer_create(&hidden_scan_timer_args, &hidden_scan_timer_);
 }
 
 WifiBoard::~WifiBoard() {
     if (connect_timer_) {
         esp_timer_stop(connect_timer_);
         esp_timer_delete(connect_timer_);
+    }
+    esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, OnWifiEvent);
+    esp_event_handler_unregister(WIFI_BOARD_EVENT, ESP_EVENT_ANY_ID, OnWifiEvent);
+    if (hidden_scan_timer_) {
+        esp_timer_stop(hidden_scan_timer_);
+        esp_timer_delete(hidden_scan_timer_);
     }
 }
 
@@ -68,6 +100,11 @@ void WifiBoard::StartNetwork() {
         config.station_hostname = hostname;
     }
     wifi_manager.Initialize(config);
+
+    // Registered before the station starts, so this handler sees
+    // WIFI_EVENT_STA_START and runs before the Wi-Fi component's handler
+    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, OnWifiEvent, this);
+    esp_event_handler_register(WIFI_BOARD_EVENT, ESP_EVENT_ANY_ID, OnWifiEvent, this);
 
     // Set unified event callback - forward to NetworkEvent with SSID data
     wifi_manager.SetEventCallback([this](WifiEvent event, const std::string& data) {
@@ -130,6 +167,8 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
             ESP_LOGI(TAG, "WiFi scanning");
             break;
         case NetworkEvent::Connecting:
+            // The Wi-Fi component found a saved network in its last scan
+            scan_missed_ = false;
             ESP_LOGI(TAG, "WiFi connecting to %s", data.c_str());
             break;
         case NetworkEvent::Disconnected:
@@ -165,6 +204,72 @@ void WifiBoard::OnWifiConnectTimeout(void* arg) {
 
     WifiManager::GetInstance().StopStation();
     board->StartWifiConfigMode();
+}
+
+void WifiBoard::OnWifiEvent(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+    auto* board = static_cast<WifiBoard*>(arg);
+    if (event_base == WIFI_BOARD_EVENT) {
+        board->StartHiddenSsidScan();
+        return;
+    }
+
+    switch (event_id) {
+        case WIFI_EVENT_STA_START:
+            // The setup hotspot also starts the station interface, for its own scans
+            board->hidden_scan_active_ = !board->in_config_mode_;
+            board->station_associated_ = false;
+            board->scan_missed_ = false;
+            break;
+        case WIFI_EVENT_STA_STOP:
+            board->hidden_scan_active_ = false;
+            break;
+        case WIFI_EVENT_STA_CONNECTED:
+            board->station_associated_ = true;
+            break;
+        case WIFI_EVENT_STA_DISCONNECTED:
+            board->station_associated_ = false;
+            break;
+        case WIFI_EVENT_SCAN_DONE:
+            if (board->hidden_scan_active_ && board->station_associated_) {
+                // After a join found by a directed scan, the component's scan
+                // timer is still running and scans while connected. Drop the
+                // results so that its handler does not reconnect.
+                esp_wifi_clear_ap_list();
+            }
+            // Cleared by the Connecting event if the component's handler,
+            // which runs after this one, finds a saved network
+            board->scan_missed_ = true;
+            break;
+        default:
+            return;
+    }
+
+    esp_timer_stop(board->hidden_scan_timer_);
+    if (board->hidden_scan_active_ && !board->station_associated_) {
+        esp_timer_start_once(board->hidden_scan_timer_, HIDDEN_SCAN_DELAY_SEC * 1000000ULL);
+    }
+}
+
+void WifiBoard::StartHiddenSsidScan() {
+    if (!hidden_scan_active_ || station_associated_ || !scan_missed_) {
+        return;
+    }
+    auto& ssid_list = SsidManager::GetInstance().GetSsidList();
+    if (ssid_list.empty()) {
+        return;
+    }
+
+    hidden_scan_ssid_ = ssid_list[hidden_scan_index_++ % ssid_list.size()].ssid;
+    wifi_scan_config_t scan_config = {};
+    scan_config.ssid = reinterpret_cast<uint8_t*>(hidden_scan_ssid_.data());
+    esp_err_t err = esp_wifi_scan_start(&scan_config, false);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Scanning for SSID %s", hidden_scan_ssid_.c_str());
+    } else {
+        // Fails while the station is connecting; try again later
+        ESP_LOGD(TAG, "Directed scan not started: %s", esp_err_to_name(err));
+        esp_timer_start_once(hidden_scan_timer_, HIDDEN_SCAN_DELAY_SEC * 1000000ULL);
+    }
 }
 
 void WifiBoard::StartWifiConfigMode() {
