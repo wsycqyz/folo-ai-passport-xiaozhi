@@ -7,6 +7,8 @@
 //   KUI SHOT    stream the current screen
 //   KUI DEMO    stream a scripted gallery of the screens, then restore
 //   KUI CHAT    toggle the chat state like the OK key
+//   KUI SLEEP   deep sleep until a key (KUI SLEEP s: or until s seconds pass)
+//   KUI INFO    print uptime, reset reason, wake causes, state and screen
 // A frame is streamed from the LVGL flush path as text lines:
 //   KUI:FRAME <name> <width> <height>
 //   KUI:TILE <x1> <y1> <x2> <y2> <crc32> <base64 of little-endian RGB565 rows>
@@ -17,6 +19,9 @@
 #include <esp_app_desc.h>
 #include <esp_log.h>
 #include <esp_mac.h>
+#include <esp_sleep.h>
+#include <esp_system.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <unistd.h>
@@ -26,6 +31,7 @@
 #include <ctime>
 #include <initializer_list>
 #include <string>
+#include <utility>
 
 #include "application.h"
 #include "assets/lang_config.h"
@@ -37,6 +43,12 @@
 #define TAG "KidsConsole"
 
 namespace {
+
+#if CONFIG_AI_PASSPORT_IDLE_DEEP_SLEEP
+constexpr int kIdleDeepSleep = 1;
+#else
+constexpr int kIdleDeepSleep = 0;
+#endif
 
 uint32_t Crc32(uint32_t crc, const uint8_t* data, size_t length) {
     static const uint32_t kTable[16] = {
@@ -142,8 +154,13 @@ void KidsDisplay::PollConsole() {
     }
 }
 
+void KidsDisplay::SetDeepSleepHandler(std::function<void(int)> handler) {
+    deep_sleep_handler_ = std::move(handler);
+}
+
 void KidsDisplay::HandleCommand(const char* line) {
     int value = -1;
+    int seconds = 0;
     if (sscanf(line, "KUI VOL %d", &value) == 1 && value >= 0 && value <= 100) {
         Board::GetInstance().GetAudioCodec()->SetOutputVolume(value);
         printf("KUI:VOL %d OK\n", value);
@@ -154,6 +171,31 @@ void KidsDisplay::HandleCommand(const char* line) {
     } else if (strcmp(line, "KUI CHAT") == 0) {
         Application::GetInstance().ToggleChatState();
         printf("KUI:CHAT OK\n");
+    } else if (strcmp(line, "KUI SLEEP") == 0 ||
+               (sscanf(line, "KUI SLEEP %d", &seconds) == 1 && seconds >= 0)) {
+        if (!Application::GetInstance().CanEnterSleepMode()) {
+            printf("KUI:ERR sleep needs the idle state\n");
+        } else {
+            printf("KUI:SLEEP OK\n");
+            fflush(stdout);
+            // Let the PC read the reply before the USB port goes away.
+            vTaskDelay(pdMS_TO_TICKS(100));
+            deep_sleep_handler_(seconds);
+        }
+    } else if (strcmp(line, "KUI INFO") == 0) {
+        bool asleep;
+        {
+            DisplayLockGuard lock(this);
+            asleep = asleep_;
+        }
+        printf(
+            "KUI:INFO uptime=%lld reset=%d wake=0x%lx state=%d brightness=%d asleep=%d "
+            "autosleep=%d\n",
+            static_cast<long long>(esp_timer_get_time() / 1000000),
+            static_cast<int>(esp_reset_reason()),
+            static_cast<unsigned long>(esp_sleep_get_wakeup_causes()),
+            static_cast<int>(Application::GetInstance().GetDeviceState()),
+            Board::GetInstance().GetBacklight()->brightness(), asleep ? 1 : 0, kIdleDeepSleep);
     } else if (strncmp(line, "KUI", 3) == 0) {
         printf("KUI:ERR unknown command\n");
     }
@@ -241,12 +283,16 @@ void KidsDisplay::RunDemo() {
         return;
     }
     std::string status, emotion, user_text, system_text;
+    bool asleep;
     {
         DisplayLockGuard lock(this);
         status = status_;
         emotion = emotion_;
         user_text = user_text_;
         system_text = system_text_;
+        asleep = asleep_;
+        // Like a real boot: she sleeps until a conversation starts.
+        asleep_ = true;
         posed_ = true;
     }
     printf("KUI:DEMO BEGIN\n");
@@ -283,6 +329,9 @@ void KidsDisplay::RunDemo() {
     ClearChatMessages();
     SetEmotion("neutral");
     DemoCapture("idle");
+
+    Sleep();
+    DemoCapture("asleep");
 
     inject(kDeviceStateListening);
     SetStatus(Lang::Strings::LISTENING);
@@ -392,6 +441,7 @@ void KidsDisplay::RunDemo() {
         emotion_ = emotion;
         user_text_ = user_text;
         system_text_ = system_text;
+        asleep_ = asleep;
         LvglDisplay::SetStatus(status_.c_str());
         Refresh();
     }

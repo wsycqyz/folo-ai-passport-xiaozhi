@@ -399,6 +399,15 @@ config AI_PASSPORT_KIDS_UI
         shows only the child's own words. Adds the KUI maintenance commands
         (volume, screen capture, gallery) on the USB Serial/JTAG console.
 
+config AI_PASSPORT_IDLE_DEEP_SLEEP
+    bool "AI Passport kids UI: deep sleep when idle (release firmware)"
+    depends on AI_PASSPORT_KIDS_UI
+    default n
+    help
+        Release firmware switch: after 180 seconds without a conversation or
+        a key press the device enters deep sleep, and any key wakes it. Test
+        firmware leaves it off and stays awake for debugging.
+
 choice WAKE_WORD_TYPE
     prompt "Wake Word Implementation Type"
     default USE_AFE_WAKE_WORD if (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32S31) && SPIRAM

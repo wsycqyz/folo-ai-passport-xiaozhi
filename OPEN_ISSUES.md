@@ -2,6 +2,41 @@
 
 Things that could change the code later. Delete an entry when it is settled.
 
+## 2026-11-25: Every start and every wake asks the server for the version, which starts the server
+
+- Context: The owner noticed that `正在检查新版本` can take long after a start or a wake. It is XiaoZhi's own boot step (`Application::CheckNewVersion`, `Ota::CheckVersion`): the device posts its details to the OTA address and waits for the answer, for up to 90 seconds since `36847d0`. With the bridge that request starts the container when it is scaled to zero; the answer took 21 and 50 seconds on 2026-11-25. The bridge answers with the time, the WebSocket address and token, and the running version without a download address. It has no activation.
+- Open: For this device the answer brings only the clock. The WebSocket settings are already stored from the last start, the bridge never offers an update, and after a wake from deep sleep the clock is still running. With release firmware every wake therefore starts the server, which costs waiting time and container time. The firmware cannot skip the step as it is: it chooses WebSocket or MQTT from the answer of that start, not from the stored settings.
+- For now: Unchanged.
+- Needs: Decide whether the device should go to idle from the stored settings and skip the check after a wake from deep sleep, and where the clock should come from after a power-on (the check in the background, or a time server).
+
+## 2026-11-25: After a wake the access point can keep the device out, and Wi-Fi setup never sleeps
+
+- Context: Before deep sleep the firmware disconnects from the access point; a wake restarts the firmware, which connects again. On 2026-11-25, with the test firmware and `KUI SLEEP`: after five sleeps of 10 seconds to 2.5 minutes the device was connected again within a few seconds (an address 2.0 to 2.5 seconds after the wake, measured four times). After one sleep of 2.5 minutes the access point answered the first association request late and then ignored every authentication, as in the entry of 2026-11-24 on restarts. After 60 seconds the firmware opened Wi-Fi setup mode. A restart with the power key ended the same way, and a second restart connected after 11 seconds. The reset after flashing also ended in Wi-Fi setup twice that day.
+- Open: With release firmware every wake is a new connection. When the access point keeps the device out for more than 60 seconds, the child sees the Wi-Fi setup screen. In that mode nothing dims or sleeps, because the idle timers only run in the idle state (a code-review finding), so the battery drains until someone restarts the device. Away from home, an accidental key press ends the same way.
+- For now: Unchanged common behaviour (`CONNECT_TIMEOUT_SEC = 60` in `WifiBoard`). The owner knows the access point's behaviour and asked not to debug it.
+- Needs: Decide before the release firmware is used every day: keep retrying the saved network after a wake instead of opening setup mode, go back to deep sleep after some minutes in Wi-Fi setup, or change the access point.
+
+## 2026-11-25: The release firmware's sleep after 180 seconds was compiled, not run
+
+- Context: `ai-passport-kids-release` differs from the test firmware only by `CONFIG_AI_PASSPORT_IDLE_DEEP_SLEEP`, and the owner asked that only test firmware is flashed unless he confirms. On the device, with the test firmware on 2026-11-25: deep sleep entered with `KUI SLEEP`; wakes by timer after 10 to 150 seconds, by a DOWN key held for 2 seconds (its click was ignored and the volume stayed) and by a short OK press; the dimming after 30 seconds and its end on a key press; the mascot asleep at boot, awake during and after a chat, asleep again 30 seconds later.
+- Open: The one line that starts deep sleep after 180 seconds of idle has only been compiled. The stock variant was built, not run on the device.
+- For now: Relies on the build and on review: the check that dims the screen at 30 seconds calls the same `EnterDeepSleep()` as `KUI SLEEP`.
+- Needs: When the release firmware is wanted, flash it and leave the device idle for 3 minutes.
+
+## 2026-11-25: The current in deep sleep is not measured
+
+- Context: The firmware cannot switch the device off. Before deep sleep it stops Wi-Fi, closes the codec (the driver's ES8311 suspend), puts the panel to sleep, switches the backlight off and holds the LCD pins.
+- Open: What the device draws then is unknown. The amplifier has no enable pin, and the fuel gauge stays active on purpose, so that the battery level is right after a wake (a slept gauge reports 0 % for a while, which would raise the low-battery popup). FoloToy's BSP also writes an ES8311 register sequence of its own and releases the I2S and I2C pins; that was not copied. During sleep the key pin has the chip's pull-up next to the board's 10 kOhm one, so OK reads about 0.70 V against a limit of 0.825 V for a low level (an estimate); a short OK press woke the device in the one test.
+- For now: As described.
+- Needs: A current measurement if the battery does not last as expected in deep sleep, or a report if OK ever fails to wake the device.
+
+## 2026-11-25: One power-on reset in Wi-Fi setup mode
+
+- Context: During the device tests on 2026-11-25, on USB power, the device restarted once about 6 seconds after Wi-Fi setup mode had started (its access point on, its alert sound playing). The reset reason was power-on.
+- Open: The cause. Firmware cannot produce a power-on reset, so a dip of the supply is possible. It was seen once.
+- For now: Nothing.
+- Needs: Nothing unless it happens again.
+
 ## 2026-11-24: After a sentence with an English name, the assistant answered in English and missed the name
 
 - Context: The owner tried the bridge's new features by voice on the device on 2026-11-24. The time, the battery level, the volume and the brightness, an interruption with OK, a goodbye and a new chat right after it worked. Then, in a chat held in Mandarin, the owner said a Mandarin sentence with an English first name in it and a liking for dinosaurs. From that reply on the assistant spoke English for the rest of the chat (four replies), although what the owner said next was Mandarin; in the next chat it spoke Mandarin again. It also missed the name: asked for it 9 seconds later in the same chat, and again in the next chat, it said that it did not know it. The memory itself worked: the bridge wrote the notes of that chat with one fact, the dinosaurs, and loaded them for the next chat. The words on the screen had the name, in Chinese characters; they come from a separate speech recognizer.

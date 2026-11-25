@@ -9,7 +9,12 @@
 #if CONFIG_AI_PASSPORT_KIDS_UI
 #include "kids_display.h"
 
+#include <esp_sleep.h>
+#include <esp_system.h>
+#include <esp_timer.h>
+#include <iot_button.h>
 #include <nvs.h>
+#include <wifi_manager.h>
 #endif
 
 #include <esp_log.h>
@@ -33,6 +38,31 @@ enum {
     kAdcButtonNum,
 };
 
+#if CONFIG_AI_PASSPORT_KIDS_UI
+// Idle policy of the kids UI: time without a conversation or a key press.
+static constexpr int64_t kDimAfterUs = 30 * 1000 * 1000;
+#if CONFIG_AI_PASSPORT_IDLE_DEEP_SLEEP
+static constexpr int64_t kDeepSleepAfterUs = 180 * 1000 * 1000;
+#endif
+// After a wake from deep sleep, key clicks and long presses are ignored this
+// long after the buttons are created. A key still down then clicks at most
+// about 2.2 s later (2000 ms long press, 180 ms click window) or long-presses
+// at 2.0 s, and no click follows a long press.
+static constexpr int64_t kWakeKeyGuardUs = 3 * 1000 * 1000;
+
+// LCD pins as they are held through deep sleep: CS high, the others low.
+static const struct {
+    gpio_num_t pin;
+    uint32_t level;
+} kLcdSleepLevels[] = {
+    {DISPLAY_SPI_CS_PIN, 1},
+    {DISPLAY_SPI_SCK_PIN, 0},
+    {DISPLAY_SPI_MOSI_PIN, 0},
+    {DISPLAY_DC_PIN, 0},
+    {DISPLAY_BACKLIGHT_PIN, 0},
+};
+#endif
+
 class AiPassportBoard : public WifiBoard {
 private:
     i2c_master_bus_handle_t codec_i2c_bus_;
@@ -41,6 +71,17 @@ private:
     LcdDisplay* display_;
     Cw2017BatteryMonitor* battery_;
     std::atomic<bool> ok_pressed_while_connecting_{false};
+#if CONFIG_AI_PASSPORT_KIDS_UI
+    esp_lcd_panel_handle_t panel_ = nullptr;
+    esp_timer_handle_t idle_timer_ = nullptr;
+    std::atomic<bool> idle_check_queued_{false};
+    // Set before the key callbacks are registered; they read it.
+    int64_t key_actions_after_us_ = 0;
+    // Idle policy state, used on the main task only.
+    int64_t last_activity_us_ = 0;
+    bool dimmed_ = false;
+    bool woke_from_deep_sleep_ = false;
+#endif
 
     void InitializeCodecI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -89,10 +130,30 @@ private:
     void ToggleChat() {
         auto& app = Application::GetInstance();
         if (app.GetDeviceState() == kDeviceStateStarting) {
+#if CONFIG_AI_PASSPORT_KIDS_UI
+            // A child who woke the device with a key presses OK again while
+            // it starts: that must not open the Wi-Fi setup.
+            if (woke_from_deep_sleep_) {
+                return;
+            }
+#endif
             EnterWifiConfigMode();
             return;
         }
         app.ToggleChatState();
+    }
+
+    // The key that wakes the device from deep sleep may still be down when the
+    // buttons come up, and it would then click or long-press. Checked when the
+    // button event fires: the main task may run the action much later.
+    bool KeyActionBlocked() const {
+#if CONFIG_AI_PASSPORT_KIDS_UI
+        if (esp_timer_get_time() < key_actions_after_us_) {
+            ESP_LOGI(TAG, "Key action ignored: too soon after the wake");
+            return true;
+        }
+#endif
+        return false;
     }
 
     void InitializeButtons() {
@@ -128,13 +189,25 @@ private:
         adc_cfg.max = BSP_ADC_BUTTON_OK_MAX;
         adc_button_[kAdcButtonOk] = new AdcButton(adc_cfg);
 
+#if CONFIG_AI_PASSPORT_KIDS_UI
+        if (woke_from_deep_sleep_) {
+            key_actions_after_us_ = esp_timer_get_time() + kWakeKeyGuardUs;
+        }
+#endif
+
         // Button callbacks run on the button task; schedule all UI/audio
         // work onto the main task so LVGL and codec access stay on one thread.
         auto up = adc_button_[kAdcButtonUp];
         up->OnClick([this]() {
+            if (KeyActionBlocked()) {
+                return;
+            }
             Application::GetInstance().Schedule([this]() { ChangeVolume(10); });
         });
         up->OnLongPress([this]() {
+            if (KeyActionBlocked()) {
+                return;
+            }
             Application::GetInstance().Schedule([this]() {
                 GetAudioCodec()->SetOutputVolume(100);
                 ShowVolume(100, Lang::Strings::MAX_VOLUME);
@@ -143,14 +216,30 @@ private:
 
         auto down = adc_button_[kAdcButtonDown];
         down->OnClick([this]() {
+            if (KeyActionBlocked()) {
+                return;
+            }
             Application::GetInstance().Schedule([this]() { ChangeVolume(-10); });
         });
         down->OnLongPress([this]() {
+            if (KeyActionBlocked()) {
+                return;
+            }
             Application::GetInstance().Schedule([this]() {
                 GetAudioCodec()->SetOutputVolume(0);
                 ShowVolume(0, Lang::Strings::MUTED);
             });
         });
+
+#if CONFIG_AI_PASSPORT_KIDS_UI
+        // Any key press restores the dimmed screen and then acts as usual (OK
+        // does this in its own press-down callback below).
+        for (auto button : {up, down}) {
+            button->OnPressDown([this]() {
+                Application::GetInstance().Schedule([this]() { OnActivity(); });
+            });
+        }
+#endif
 
         auto ok = adc_button_[kAdcButtonOk];
         // Opening a chat blocks the main task, for about a minute when the
@@ -162,9 +251,12 @@ private:
         ok->OnPressDown([this]() {
             ok_pressed_while_connecting_ =
                 Application::GetInstance().GetDeviceState() == kDeviceStateConnecting;
+#if CONFIG_AI_PASSPORT_KIDS_UI
+            Application::GetInstance().Schedule([this]() { OnActivity(); });
+#endif
         });
         ok->OnClick([this]() {
-            if (ok_pressed_while_connecting_ ||
+            if (KeyActionBlocked() || ok_pressed_while_connecting_ ||
                 Application::GetInstance().GetDeviceState() == kDeviceStateConnecting) {
                 return;
             }
@@ -244,6 +336,7 @@ private:
         esp_lcd_panel_disp_on_off(panel, true);
 
 #if CONFIG_AI_PASSPORT_KIDS_UI
+        panel_ = panel;  // LcdDisplay keeps its copy protected; deep sleep needs it
         display_ =
             new KidsDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X,
                             DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
@@ -274,11 +367,137 @@ private:
         }
         nvs_close(nvs);
     }
+
+    void DriveLcdPinsToSleepLevels() {
+        for (const auto& lcd : kLcdSleepLevels) {
+            gpio_set_level(lcd.pin, lcd.level);
+            gpio_set_direction(lcd.pin, GPIO_MODE_OUTPUT);
+        }
+    }
+
+    // Deep sleep holds the LCD pins, and the holds survive the wake-up reset:
+    // release them at the held levels before SPI and LEDC take the pins.
+    void ReleaseDeepSleepHolds() {
+        woke_from_deep_sleep_ = esp_reset_reason() == ESP_RST_DEEPSLEEP;
+        gpio_deep_sleep_hold_dis();
+        DriveLcdPinsToSleepLevels();
+        for (const auto& lcd : kLcdSleepLevels) {
+            gpio_hold_dis(lcd.pin);
+        }
+        gpio_hold_dis(BSP_ADC_BUTTON_GPIO);
+    }
+
+    void InitializeIdleTimer() {
+#if CONFIG_AI_PASSPORT_IDLE_DEEP_SLEEP
+        ESP_LOGI(TAG, "Idle: dim after 30 s, deep sleep after 180 s (release firmware)");
+#else
+        ESP_LOGI(TAG, "Idle: dim after 30 s, no deep sleep (test firmware)");
+#endif
+        esp_timer_create_args_t timer_args = {
+            .callback = [](void* arg) {
+                auto self = static_cast<AiPassportBoard*>(arg);
+                // At most one check waits while the main task is busy.
+                if (!self->idle_check_queued_.exchange(true)) {
+                    Application::GetInstance().Schedule([self]() {
+                        self->idle_check_queued_ = false;
+                        self->CheckIdle();
+                    });
+                }
+            },
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "idle_timer",
+            .skip_unhandled_events = true,
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &idle_timer_));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(idle_timer_, 1000 * 1000));
+    }
+
+    // The idle policy runs on the main task.
+    void CheckIdle() {
+        if (!Application::GetInstance().CanEnterSleepMode()) {
+            OnActivity();
+            return;
+        }
+        int64_t idle_us = esp_timer_get_time() - last_activity_us_;
+        if (idle_us >= kDimAfterUs && !dimmed_) {
+            dimmed_ = true;
+            auto backlight = GetBacklight();
+            backlight->SetBrightness(backlight->min_brightness());
+            static_cast<KidsDisplay*>(display_)->Sleep();
+        }
+#if CONFIG_AI_PASSPORT_IDLE_DEEP_SLEEP
+        if (idle_us >= kDeepSleepAfterUs) {
+            EnterDeepSleep(0);
+        }
+#endif
+    }
+
+    void OnActivity() {
+        last_activity_us_ = esp_timer_get_time();
+        if (dimmed_) {
+            dimmed_ = false;
+            GetBacklight()->RestoreBrightness();
+        }
+    }
+
+    // Runs on the main task and never returns: a key press (or the timer,
+    // when wake_after_seconds > 0) boots the firmware again.
+    [[noreturn]] void EnterDeepSleep(int wake_after_seconds) {
+        ESP_LOGI(TAG, "Entering deep sleep, timer wake after %d s (0: keys only)",
+                 wake_after_seconds);
+        esp_timer_stop(idle_timer_);
+
+        // While the ADC owns the key pin its digital level reads 0, which
+        // satisfies the low-level wake at once: hand the pin back first.
+        iot_button_stop();
+        for (auto button : adc_button_) {
+            delete static_cast<AdcButton*>(button);  // Button has no virtual destructor
+        }
+        adc_oneshot_del_unit(adc_handle_);
+        gpio_set_direction(BSP_ADC_BUTTON_GPIO, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(BSP_ADC_BUTTON_GPIO, GPIO_PULLUP_ONLY);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        // A key held now wakes the device at once, which is just a restart.
+        ESP_LOGI(TAG, "Key pin level before sleep: %d", gpio_get_level(BSP_ADC_BUTTON_GPIO));
+
+        // A clean disconnect for the access point.
+        WifiManager::GetInstance().StopStation();
+
+        auto codec = GetAudioCodec();
+        codec->EnableInput(false);
+        codec->EnableOutput(false);
+
+        // Keep the display lock: LVGL must not flush to the panel once it is off.
+        DisplayLockGuard lock(display_);
+        gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
+        gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
+        esp_lcd_panel_disp_on_off(panel_, false);
+        esp_lcd_panel_disp_sleep(panel_, true);
+        DriveLcdPinsToSleepLevels();
+        for (const auto& lcd : kLcdSleepLevels) {
+            gpio_hold_en(lcd.pin);
+        }
+        gpio_deep_sleep_hold_en();
+
+        // The wake API takes a bit mask, not a pin number.
+        esp_err_t err = esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(
+            BIT64(BSP_ADC_BUTTON_GPIO), ESP_GPIO_WAKEUP_GPIO_LOW);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Cannot arm the key wake (%s), restarting instead", esp_err_to_name(err));
+            esp_restart();
+        }
+        if (wake_after_seconds > 0) {
+            esp_sleep_enable_timer_wakeup(wake_after_seconds * 1000000ULL);
+        }
+        esp_deep_sleep_start();
+    }
 #endif
 
 public:
     AiPassportBoard() : display_(nullptr), battery_(nullptr) {
 #if CONFIG_AI_PASSPORT_KIDS_UI
+        ReleaseDeepSleepHolds();
         FixWifiTxPower();
         // Backlight off (PWM duty 0) until the display has drawn its dark first frame.
         // The device has no brightness key, so voice must not turn the screen off.
@@ -288,6 +507,11 @@ public:
         InitializeSpi();
         InitializeDisplay();
         InitializeButtons();
+#if CONFIG_AI_PASSPORT_KIDS_UI
+        static_cast<KidsDisplay*>(display_)->SetDeepSleepHandler(
+            [this](int seconds) { EnterDeepSleep(seconds); });
+        InitializeIdleTimer();
+#endif
         GetBacklight()->RestoreBrightness();
     }
 

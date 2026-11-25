@@ -7,6 +7,8 @@ DTR and RTS low, so opening it does not reset the device.
     python scripts/kids_ui/kui.py --port COM3 shot --out DIR # save the screen as PNG
     python scripts/kids_ui/kui.py --port COM3 demo --out DIR # gallery PNGs + contact sheet
     python scripts/kids_ui/kui.py --port COM3 chat           # toggle the chat (OK key)
+    python scripts/kids_ui/kui.py --port COM3 sleep          # deep sleep; --wake-after N: timer wake
+    python scripts/kids_ui/kui.py --port COM3 info           # uptime, reset and wake cause, state
 
 --log FILE appends everything the device prints; --echo also shows the device
 log (long hex runs redacted); --linger S keeps reading S seconds afterwards.
@@ -213,6 +215,10 @@ def main():
     demo = sub.add_parser("demo", help="save the scripted gallery")
     demo.add_argument("--out", type=Path, required=True)
     sub.add_parser("chat", help="toggle the chat state")
+    sleep = sub.add_parser("sleep", help="enter deep sleep until a key press")
+    sleep.add_argument("--wake-after", type=int, default=0, metavar="N",
+                       help="also wake by timer after N seconds")
+    sub.add_parser("info", help="print uptime, reset reason, wake causes, state and screen")
     args = parser.parse_args()
 
     device = Device(args.port, args.log, args.echo)
@@ -238,6 +244,27 @@ def main():
                 pass
             print("KUI:CHAT OK" if text else "no acknowledgement")
             status = 0 if text else 1
+        elif args.command == "info":
+            device.send("KUI INFO")
+            deadline = time.time() + 5
+            while (text := device.line(deadline)) is not None and not text.startswith("KUI:INFO"):
+                pass
+            print(text if text else "no answer")
+            status = 0 if text else 1
+        elif args.command == "sleep":
+            device.send(f"KUI SLEEP {args.wake_after}" if args.wake_after else "KUI SLEEP")
+            reply = None
+            deadline = time.time() + 5
+            try:
+                while reply is None and (text := device.line(deadline)) is not None:
+                    if text.startswith(("KUI:SLEEP OK", "KUI:ERR")):
+                        reply = text
+                if args.linger:
+                    device.linger(args.linger)
+            except serial.SerialException:
+                pass  # the USB port goes away when the device sleeps
+            print(reply or "no acknowledgement")
+            status = 0 if reply and reply.startswith("KUI:SLEEP OK") else 1
         elif args.command == "shot":
             args.out.mkdir(parents=True, exist_ok=True)
             for attempt in range(3):
@@ -263,7 +290,7 @@ def main():
                 contact_sheet(frames, args.out / "contact_sheet.png")
             print(f"saved {len(good)}/{len(frames)} frames and contact_sheet.png to {args.out}")
             status = 0 if frames and len(good) == len(frames) else 1
-        if args.linger:
+        if args.linger and args.command != "sleep":
             device.linger(args.linger)
     finally:
         device.close()

@@ -82,6 +82,9 @@ replaces it.
 python scripts/build.py folotoy/ai-passport -c config.kids.json --name ai-passport-kids
 ```
 
+This builds the test firmware, which stays awake; see
+[Test and release firmware](#test-and-release-firmware).
+
 What it changes (`CONFIG_AI_PASSPORT_KIDS_UI`, implemented in `kids_display.cc`):
 
 - **Dark "starry night" screens in every state**, from the first frame and
@@ -111,6 +114,52 @@ built-in `basic` font, because the larger `common` font in the assets partition
 is loaded only after the network is up. `scripts/tests/test_kids_ui.py` checks
 this, and that `kids_art.c` matches the generator.
 
+### Rest and sleep
+
+- **The mascot sleeps until someone talks to her.** From the first frame after
+  a power-on or a wake-up she is asleep: closed eyes, rising Zzz and slow
+  breathing. Starting a conversation wakes her, and she stays awake when it
+  ends. While she sleeps, an error keeps its pill and its message but not its
+  sad face.
+- **After 30 seconds without a conversation or a key press** the backlight
+  drops to its minimum (10) and she falls asleep again. Any key brings the
+  stored brightness back and does its usual job at once: OK starts a chat, UP
+  and DOWN change the volume. Only a conversation wakes her.
+- **Release firmware: after 180 seconds the device enters deep sleep.** The
+  power key cuts the power in hardware and the firmware cannot use it, so deep
+  sleep is the lowest state the firmware can reach: Wi-Fi, the codec, the
+  panel and the backlight are off. Any key wakes the device, which restarts
+  the firmware. On 2026-11-25 the idle screen was back 5 seconds after a key
+  press, when the access point and the server answered at once.
+- **The key that wakes the device only wakes it.** For 3 seconds after a wake,
+  clicks and long presses are ignored, because that key may still be held.
+  Until the device has started, OK does not open the Wi-Fi setup; a start with
+  the power key keeps that shortcut.
+- Nothing dims or sleeps outside the idle state: not during a conversation,
+  while starting, in Wi-Fi setup or during an upgrade.
+
+### Test and release firmware
+
+`config.kids.json` has two builds. They differ only in
+`CONFIG_AI_PASSPORT_IDLE_DEEP_SLEEP`, and `scripts/tests/test_kids_ui.py` keeps
+them from drifting apart:
+
+| Build name | Purpose | Deep sleep after 180 s idle |
+| --- | --- | --- |
+| `ai-passport-kids` | Test firmware, the default: stays awake for debugging | No |
+| `ai-passport-kids-release` | Release firmware | Yes |
+
+```sh
+python scripts/build.py folotoy/ai-passport -c config.kids.json --name ai-passport-kids
+python scripts/build.py folotoy/ai-passport -c config.kids.json --name ai-passport-kids-release
+```
+
+Both write to `build/`, so check which one is there before flashing: `sdkconfig`
+has `CONFIG_AI_PASSPORT_IDLE_DEEP_SLEEP=y` only after a release build. On the
+device, the boot log names the firmware (`no deep sleep (test firmware)`) and
+`KUI INFO` reports `autosleep=0` or `autosleep=1`. Deep sleep itself can be
+tried on the test firmware with `KUI SLEEP`.
+
 ### Flash without losing the device's settings
 
 `build/merged-binary.bin` covers the NVS partition, so writing it at 0x0 erases
@@ -138,6 +187,11 @@ files; it needs only pyserial, so the ESP-IDF Python can run it.
 | `KUI SHOT` | `shot --out DIR` | Stream the current screen. |
 | `KUI DEMO` | `demo --out DIR` | Show a scripted gallery of every screen, stream each one, then restore the real state. Needs the idle state. |
 | `KUI CHAT` | `chat` | Toggle the chat, like the OK key. |
+| `KUI SLEEP [s]` | `sleep [--wake-after s]` | Enter deep sleep now, on either firmware. Any key wakes the device; with `s` it also wakes by itself after `s` seconds. Needs the idle state. |
+| `KUI INFO` | `info` | Print one line: uptime, reset reason (8 = wake from deep sleep), wake causes (0x80 = key, 0x10 = timer), device state (3 = idle), brightness, `asleep` (the mascot) and `autosleep` (1 = release firmware). |
+
+The commands do not count as activity: the screen still dims while they are
+used, and release firmware still goes to sleep.
 
 Screens are captured from the LVGL flush path, after the rounded-corner mask,
 so a capture is what the panel shows.

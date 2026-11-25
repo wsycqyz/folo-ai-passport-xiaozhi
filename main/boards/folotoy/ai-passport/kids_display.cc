@@ -533,6 +533,12 @@ void KidsDisplay::ShowVolume(int volume) {
     volume_until_ = tick_ + kVolumeTicks;
 }
 
+void KidsDisplay::Sleep() {
+    DisplayLockGuard lock(this);
+    asleep_ = true;
+    Refresh();
+}
+
 void KidsDisplay::VolumeBarDrawEvent(lv_event_t* event) {
     auto* self = static_cast<KidsDisplay*>(lv_event_get_user_data(event));
     lv_obj_t* bar = lv_event_get_target_obj(event);
@@ -557,6 +563,10 @@ void KidsDisplay::TrackState() {
         return;
     }
     last_state_ = state;
+    // She wakes up for a conversation; the board puts her back to sleep.
+    if (state == kDeviceStateConnecting || state == kDeviceStateListening || IsSpeaking(state)) {
+        asleep_ = false;
+    }
     // Her words stay through the answer and go away when a new turn starts.
     if (state == kDeviceStateListening || state == kDeviceStateConnecting ||
         state == kDeviceStateIdle) {
@@ -712,7 +722,10 @@ KidsDisplay::Look KidsDisplay::ComputeLook(DeviceState state) const {
     }
     Look look = {KIDS_EYES_OPEN, KIDS_MOUTH_CAT, KIDS_FX_NONE, false};
     const std::string& e = emotion_;
-    if (OneOf(e, {"sad", "crying", "angry", "warning", "cancel", "cloud_off"})) {
+    if (asleep_) {
+        // Sleep wins over the emotion: an error keeps only its pill and message.
+        look = {KIDS_EYES_CLOSED, KIDS_MOUTH_CAT, KIDS_FX_ZZZ, false};
+    } else if (OneOf(e, {"sad", "crying", "angry", "warning", "cancel", "cloud_off"})) {
         look = {KIDS_EYES_SAD, KIDS_MOUTH_SAD, KIDS_FX_NONE, false};
     } else if (OneOf(e, {"happy", "funny"})) {
         look = {KIDS_EYES_HAPPY, KIDS_MOUTH_SMILE, KIDS_FX_NONE, false};
@@ -744,9 +757,13 @@ void KidsDisplay::ApplyLook() {
     if (!posed_ && tick_ < blink_end_ && CanBlink(eyes)) {
         eyes = KIDS_EYES_CLOSED;
     }
+    const uint32_t zzz_phase = (tick_ / 14) % 4;
     kids_mouth_t mouth = look_.mouth;
     if (look_.talk) {
         mouth = posed_ ? KIDS_MOUTH_OPEN_M : kTalk[talk_step_].mouth;
+    } else if (look_.fx == KIDS_FX_ZZZ && !posed_) {
+        // She breathes slowly in step with the Zzz.
+        mouth = zzz_phase < 2 ? KIDS_MOUTH_OPEN_S : KIDS_MOUTH_CAT;
     }
     int frame = -1;
     switch (look_.fx) {
@@ -757,7 +774,7 @@ void KidsDisplay::ApplyLook() {
             frame = kThinkFrames[(tick_ / 10) % 4];
             break;
         case KIDS_FX_ZZZ:
-            frame = kZzzFrames[(tick_ / 14) % 4];
+            frame = kZzzFrames[zzz_phase];
             break;
         case KIDS_FX_NOTES:
             frame = kNoteFrames[(tick_ / 8) % 3];

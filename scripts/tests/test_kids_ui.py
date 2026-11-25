@@ -91,6 +91,17 @@ class KidsUiTest(unittest.TestCase):
             missing = [c for c in text if ord(c) > 0x7F and ord(c) not in common]
             self.assertEqual(missing, [], f"{name} uses characters missing from the common font")
 
+    def test_release_build_only_adds_idle_deep_sleep(self):
+        config = json.loads((BOARD / "config.kids.json").read_text(encoding="utf-8"))
+        builds = {build["name"]: build for build in config["builds"]}
+        test, release = builds["ai-passport-kids"], builds["ai-passport-kids-release"]
+        symbol = "CONFIG_AI_PASSPORT_IDLE_DEEP_SLEEP"
+        self.assertEqual([o for o in test["sdkconfig_append"] if o.startswith(symbol + "=")], [],
+                         "the test firmware must stay awake")
+        expected = dict(test, name="ai-passport-kids-release",
+                        sdkconfig_append=test["sdkconfig_append"] + [symbol + "=y"])
+        self.assertEqual(release, expected, "the release build drifted from the test build")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,7 @@
 #include "kids_art.h"
 
 #include <atomic>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,11 @@ public:
 
     // Shows a speaker icon and a 10-step bar in the status pill for 2 seconds.
     void ShowVolume(int volume);
+    // Puts the mascot to sleep until the next conversation starts.
+    void Sleep();
+    // Runs the board's deep sleep for KUI SLEEP; the argument is the timer
+    // wake in seconds (0: keys only).
+    void SetDeepSleepHandler(std::function<void(int)> handler);
 
 private:
     enum class BubbleMode { kNone, kHintKey, kHint, kListen, kUser, kSystem };
@@ -49,6 +55,7 @@ private:
     std::string system_text_;
     DeviceState last_state_ = kDeviceStateUnknown;
     int injected_state_ = -1;  // >= 0: state scripted by the KUI DEMO gallery
+    bool asleep_ = true;       // from boot until a conversation starts
     bool activation_shown_ = false;
     bool ui_ready_ = false;
     std::vector<TextGlyph> staged_glyphs_;
@@ -95,6 +102,7 @@ private:
     int capture_tiles_ = 0;
     std::atomic<bool> capture_active_{false};
     std::atomic<bool> capture_done_{false};
+    std::function<void(int)> deep_sleep_handler_;
 
     DeviceState State() const;
     void Refresh();

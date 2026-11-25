@@ -48,6 +48,10 @@
 #define BSP_ADC_BUTTON_OK_MIN    447
 #define BSP_ADC_BUTTON_OK_MAX    1900
 
+// The ladder node (ADC1_CH0). Any key pulls it low, so it is also the
+// deep-sleep wake pin.
+#define BSP_ADC_BUTTON_GPIO      GPIO_NUM_0
+
 // ============================================================================
 // Display: ST7789 (ST7789P3) 240x320 portrait, 4-line SPI.
 // MOSI-only (no MISO), reset is a software reset (RST not wired).
